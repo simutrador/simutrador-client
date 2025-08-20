@@ -39,3 +39,12 @@ select = ["E", "F", "I"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = ["-v", "--tb=short"]
+
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+explicit = true
+
+[tool.uv.sources]
+"simutrador-core" = { index = "testpypi" }
