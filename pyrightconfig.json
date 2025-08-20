@@ -1,0 +1,19 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "include": ["src"],
+  "exclude": [
+    "**/__pycache__",
+    "**/.venv",
+    "**/build",
+    "**/dist",
+    "**/tests/**/fixtures"
+  ],
+  "pythonVersion": "3.11",
+  "pythonPlatform": "All",
+  "typeCheckingMode": "strict",
+  "executionEnvironments": [
+    { "root": "src" },
+    { "root": "tests", "reportPrivateUsage": "none" }
+  ]
+}
