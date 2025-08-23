@@ -9,7 +9,7 @@ dependencies = [
   "pydantic-settings>=2.10.0",
   "httpx>=0.28.0",
   "websockets>=12.0",
-  "simutrador-core>=1.0.5",
+  "simutrador-core>=1.0.8",
 ]
 
 [build-system]
