@@ -463,7 +463,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pydantic-settings", specifier = ">=2.10.0" },
-    { name = "simutrador-core", specifier = ">=1.0.8", index = "https://test.pypi.org/simple/" },
+    { name = "simutrador-core", specifier = ">=1.0.9", index = "https://test.pypi.org/simple/" },
     { name = "websockets", specifier = ">=12.0" },
 ]
 
@@ -476,16 +476,16 @@ dev = [
 
 [[package]]
 name = "simutrador-core"
-version = "1.0.8"
+version = "1.0.9"
 source = { registry = "https://test.pypi.org/simple/" }
 dependencies = [
     { name = "pandas" },
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://test-files.pythonhosted.org/packages/67/10/275cb483a7e9113dd4f5374ad2bbbb96925fd6381de07ff0c4d89bf8961b/simutrador_core-1.0.8.tar.gz", hash = "sha256:b11ca0474319a83b4d156338e817c5e148de2caec6113f4fda98712471f807fb", size = 14059, upload-time = "2025-08-23T12:52:02.881Z" }
+sdist = { url = "https://test-files.pythonhosted.org/packages/11/61/8c3360ded0128cef375bc1f7d9fdefbe50722a82dc65f0e2fa29b3024122/simutrador_core-1.0.9.tar.gz", hash = "sha256:60412eb2a4f24a3086f8f5cb8713d715ccb20aecfb627306e2b47d78b61e7e03", size = 13904, upload-time = "2025-08-23T13:27:17.676Z" }
 wheels = [
-    { url = "https://test-files.pythonhosted.org/packages/da/7b/eb74cfa4261c98bcbe3283e1a97cf000dff68f2b1751e4c250dd140fac8b/simutrador_core-1.0.8-py3-none-any.whl", hash = "sha256:694ac3119db7bd7ee9be6838be150c179b207e8aee63ce3340c16a76602bb1f8", size = 16597, upload-time = "2025-08-23T12:52:01.273Z" },
+    { url = "https://test-files.pythonhosted.org/packages/a4/11/dbcd21b9738d3ee4fb8a79e39c51c0d4aa5204f92cfaa096e907c8ce8590/simutrador_core-1.0.9-py3-none-any.whl", hash = "sha256:ba967919c94cc482f3185b82113890606d91b720741a1108076c0ba22a3f8653", size = 16095, upload-time = "2025-08-23T13:27:15.821Z" },
 ]
 
 [[package]]
