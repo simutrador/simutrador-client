@@ -384,6 +384,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-asyncio"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4e/51/f8794af39eeb870e87a8c8068642fc07bce0c854d6865d7dd0f2a9d338c2/pytest_asyncio-1.1.0.tar.gz", hash = "sha256:796aa822981e01b68c12e4827b8697108f7205020f24b5793b3c41555dab68ea", size = 46652, upload-time = "2025-07-16T04:29:26.393Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c7/9d/bf86eddabf8c6c9cb1ea9a869d6873b46f105a5d292d3a6f7071f5b07935/pytest_asyncio-1.1.0-py3-none-any.whl", hash = "sha256:5fe2d69607b0bd75c656d1211f969cadba035030156745ee09e7d71740e58ecf", size = 15157, upload-time = "2025-07-16T04:29:24.929Z" },
+]
+
+[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 source = { registry = "https://pypi.org/simple" }
@@ -455,6 +467,7 @@ dependencies = [
 dev = [
     { name = "pyright" },
     { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "ruff" },
 ]
 
@@ -463,7 +476,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pydantic-settings", specifier = ">=2.10.0" },
-    { name = "simutrador-core", specifier = ">=1.0.9", index = "https://test.pypi.org/simple/" },
+    { name = "simutrador-core", specifier = ">=1.0.10", index = "https://test.pypi.org/simple/" },
     { name = "websockets", specifier = ">=12.0" },
 ]
 
@@ -471,21 +484,22 @@ requires-dist = [
 dev = [
     { name = "pyright", specifier = ">=1.1.376" },
     { name = "pytest", specifier = ">=8.2" },
+    { name = "pytest-asyncio", specifier = ">=1.1.0" },
     { name = "ruff", specifier = ">=0.11.0" },
 ]
 
 [[package]]
 name = "simutrador-core"
-version = "1.0.9"
+version = "1.0.10"
 source = { registry = "https://test.pypi.org/simple/" }
 dependencies = [
     { name = "pandas" },
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://test-files.pythonhosted.org/packages/11/61/8c3360ded0128cef375bc1f7d9fdefbe50722a82dc65f0e2fa29b3024122/simutrador_core-1.0.9.tar.gz", hash = "sha256:60412eb2a4f24a3086f8f5cb8713d715ccb20aecfb627306e2b47d78b61e7e03", size = 13904, upload-time = "2025-08-23T13:27:17.676Z" }
+sdist = { url = "https://test-files.pythonhosted.org/packages/c2/f5/4476991fc61ce34da2c7ba026dc48537d7026c0ce68bc7b71ef564dcdb16/simutrador_core-1.0.10.tar.gz", hash = "sha256:160e8c3fce3d7886b19bb7aa68fcd603298844f9d37a1154d97378822b34fdc0", size = 14240, upload-time = "2025-08-26T20:41:32.103Z" }
 wheels = [
-    { url = "https://test-files.pythonhosted.org/packages/a4/11/dbcd21b9738d3ee4fb8a79e39c51c0d4aa5204f92cfaa096e907c8ce8590/simutrador_core-1.0.9-py3-none-any.whl", hash = "sha256:ba967919c94cc482f3185b82113890606d91b720741a1108076c0ba22a3f8653", size = 16095, upload-time = "2025-08-23T13:27:15.821Z" },
+    { url = "https://test-files.pythonhosted.org/packages/f3/5e/ab45a34d50b39bed0f0c57e32e750ab084b64aef09ef51d7f9e31ff34b86/simutrador_core-1.0.10-py3-none-any.whl", hash = "sha256:3972a857921184b2dbb35903af3e67254144963d0fee761fd734ce0f53fc8361", size = 16488, upload-time = "2025-08-26T20:41:30.334Z" },
 ]
 
 [[package]]

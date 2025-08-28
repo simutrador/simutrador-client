@@ -5,6 +5,10 @@ from functools import lru_cache
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from simutrador_core.utils import get_default_logger
+
+# Set up module-specific logger
+logger = get_default_logger("simutrador_client.settings")
 
 
 class WebSocketSettings(BaseModel):
@@ -13,6 +17,23 @@ class WebSocketSettings(BaseModel):
     url: str = Field(
         default="ws://127.0.0.1:8000",
         description="Base WebSocket server URL (scheme://host:port)",
+    )
+
+
+class AuthSettings(BaseModel):
+    """Authentication configuration for the client."""
+
+    api_key: str = Field(
+        default="",
+        description="API key for authentication",
+    )
+    token: str = Field(
+        default="",
+        description="JWT token (cached from authentication)",
+    )
+    server_url: str = Field(
+        default="http://127.0.0.1:8003",
+        description="Base server URL for REST API authentication",
     )
 
 
@@ -37,8 +58,12 @@ class ClientSettings(BaseSettings):
     )
 
     server: ServerSettings = Field(default_factory=ServerSettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
 
 
 @lru_cache
 def get_settings() -> ClientSettings:
-    return ClientSettings()
+    logger.debug("Loading client settings from environment")
+    settings = ClientSettings()
+    logger.info("Client settings loaded successfully")
+    return settings

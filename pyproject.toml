@@ -9,7 +9,7 @@ dependencies = [
   "pydantic-settings>=2.10.0",
   "httpx>=0.28.0",
   "websockets>=12.0",
-  "simutrador-core>=1.0.9",
+  "simutrador-core>=1.0.10",
 ]
 
 [project.scripts]
@@ -28,6 +28,7 @@ dev = [
   "ruff>=0.11.0",
   "pyright>=1.1.376",
   "pytest>=8.2",
+  "pytest-asyncio>=1.1.0",
 ]
 
 [tool.ruff]
