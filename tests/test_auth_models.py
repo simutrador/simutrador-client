@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 
 import pytest
 from pydantic import ValidationError
-
 from simutrador_core.models import (
     TokenRequest,
     TokenResponse,
@@ -82,7 +81,7 @@ class TestAuthenticationModels:
         """Test TokenResponse validation errors."""
         with pytest.raises(ValidationError):
             # Missing required fields
-            TokenResponse()
+            TokenResponse()  # pyright: ignore[reportCallIssue]
 
         with pytest.raises(ValidationError):
             # Invalid plan type
@@ -90,5 +89,5 @@ class TestAuthenticationModels:
                 access_token="test",
                 expires_in=3600,
                 user_id="user_123",
-                plan="invalid_plan",  # Should be UserPlan enum
+                plan="invalid_plan",  # pyright: ignore[reportArgumentType]
             )
