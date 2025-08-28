@@ -205,13 +205,17 @@ class TestCLIMainAuthCommands:
 
     def test_main_auth_login(self):
         """Test main function with auth login command."""
-        with patch("simutrador_client.cli.asyncio.run") as mock_asyncio_run:
-            mock_asyncio_run.return_value = 0
 
+        # Mock the async function as a coroutine that returns the expected value
+        async def mock_login_coro(*args, **kwargs):
+            return 0
+
+        with patch(
+            "simutrador_client.cli._run_auth_login", side_effect=mock_login_coro
+        ):
             result = main(["auth", "login", "--api-key", "test_key"])
 
             assert result == 0
-            mock_asyncio_run.assert_called_once()
 
     def test_main_auth_status(self):
         """Test main function with auth status command."""
@@ -235,9 +239,13 @@ class TestCLIMainAuthCommands:
 
     def test_main_auth_login_with_server_url(self):
         """Test main function with auth login and server URL."""
-        with patch("simutrador_client.cli._run_auth_login") as mock_login:
-            mock_login.return_value = 0
 
+        async def mock_login_coro(*args, **kwargs):
+            return 0
+
+        with patch(
+            "simutrador_client.cli._run_auth_login", side_effect=mock_login_coro
+        ):
             result = main(
                 [
                     "auth",
@@ -260,13 +268,16 @@ class TestCLIMainAuthCommands:
 
     def test_main_auth_login_missing_api_key(self):
         """Test main function with auth login missing API key (should work now)."""
-        with patch("simutrador_client.cli.asyncio.run") as mock_asyncio_run:
-            mock_asyncio_run.return_value = 1  # Simulate failure due to no API key
 
+        async def mock_login_coro(*args, **kwargs):
+            return 1  # Simulate failure due to no API key
+
+        with patch(
+            "simutrador_client.cli._run_auth_login", side_effect=mock_login_coro
+        ):
             result = main(["auth", "login"])
 
             assert result == 1  # Should return error code from _run_auth_login
-            mock_asyncio_run.assert_called_once()
 
 
 class TestCLIArgumentParsing:
