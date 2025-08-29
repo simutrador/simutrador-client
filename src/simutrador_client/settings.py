@@ -15,7 +15,7 @@ class WebSocketSettings(BaseModel):
     """WebSocket-related configuration for the client."""
 
     url: str = Field(
-        default="ws://127.0.0.1:8000",
+        default="ws://127.0.0.1:8003",
         description="Base WebSocket server URL (scheme://host:port)",
     )
 
@@ -32,7 +32,7 @@ class AuthSettings(BaseModel):
         description="JWT token (cached from authentication)",
     )
     server_url: str = Field(
-        default="http://127.0.0.1:8003",
+        default="http://127.0.0.1:8001",
         description="Base server URL for REST API authentication",
     )
 

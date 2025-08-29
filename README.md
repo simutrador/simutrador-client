@@ -24,12 +24,12 @@ cp .env.sample .env
 
 #### Server Configuration
 
-*   `SERVER__WEBSOCKET__URL=ws://127.0.0.1:8000` - Base WebSocket URL (used when --url is not provided)
+*   `SERVER__WEBSOCKET__URL=ws://127.0.0.1:8003` - Base WebSocket URL (used when --url is not provided)
 
 #### Authentication Configuration
 
 *   `AUTH__API_KEY=sk_your_api_key_here` - Your SimuTrador API key (makes --api-key optional)
-*   `AUTH__SERVER_URL=http://127.0.0.1:8003` - Server URL for authentication (makes --server-url optional)
+*   `AUTH__SERVER_URL=http://127.0.0.1:8001` - Server URL for authentication (makes --server-url optional)
 *   `AUTH__TOKEN=` - JWT token (automatically managed, don't set manually)
 
 #### Advanced Configuration
@@ -61,7 +61,7 @@ This means you can:
 
 *   Health check via WebSocket:
     *   `uv run simutrador-client health`
-    *   `uv run simutrador-client health --url ws://127.0.0.1:8000/ws/health`
+    *   `uv run simutrador-client health --url ws://127.0.0.1:8003/ws/health`
 
 #### Output Examples
 
