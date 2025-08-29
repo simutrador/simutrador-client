@@ -18,7 +18,7 @@ You can configure the client via environment variables or a .env file using nest
 
 Copy the sample env and adjust:
 
-```bash
+```
 cp .env.sample .env
 ```
 
@@ -41,19 +41,22 @@ cp .env.sample .env
 *   CLI argument > environment/.env > built-in defaults
 
 This means you can:
-1. **Set once in .env** - Use commands without arguments: `simutrador-client auth login`
-2. **Override when needed** - Use CLI args to override: `simutrador-client auth login --api-key different_key`
+
+1.  **Set once in .env** - Use commands without arguments: `simutrador-client auth login`
+2.  **Override when needed** - Use CLI args to override: `simutrador-client auth login --api-key different_key`
 
 ### CLI Usage
 
 #### Authentication Commands
 
 **Configuration-driven usage** (recommended - set API key in .env):
-*   `uv run simutrador-client auth login` - Uses API key from AUTH__API_KEY
+
+*   `uv run simutrador-client auth login` - Uses API key from AUTH\_\_API\_KEY
 *   `uv run simutrador-client auth status` - Check authentication status
 *   `uv run simutrador-client auth logout` - Clear cached token
 
 **Explicit argument usage** (overrides .env settings):
+
 *   `uv run simutrador-client auth login --api-key sk_your_api_key_here`
 *   `uv run simutrador-client auth login --api-key sk_key --server-url http://custom-server.com`
 
@@ -66,7 +69,8 @@ This means you can:
 #### Output Examples
 
 **Configuration-driven workflow** (recommended):
-```bash
+
+```
 # 1. Set up your .env file once
 $ cp .env.sample .env
 $ echo "AUTH__API_KEY=sk_your_actual_api_key_here" >> .env
@@ -89,7 +93,8 @@ type=health status=ok version=0.1.0
 ```
 
 **Explicit argument workflow**:
-```bash
+
+```
 $ uv run simutrador-client auth login --api-key sk_test_12345
 ✅ Authentication successful!
 User ID: user_123
@@ -111,6 +116,6 @@ We will introduce authentication settings and CLI options. Placeholders in .env.
 *   AUTH\_\_TOKEN=
 *   AUTH\_\_API\_KEY=
 
-Once implemented, documented precedence will apply similarly (CLI > env > defaults).  
+Once implemented, documented precedence will apply similarly (CLI > env > defaults).
 
 Python client SDK for SimuTrador.
