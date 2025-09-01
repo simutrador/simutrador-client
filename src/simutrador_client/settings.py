@@ -27,10 +27,6 @@ class AuthSettings(BaseModel):
         default="",
         description="API key for authentication",
     )
-    token: str = Field(
-        default="",
-        description="JWT token (cached from authentication)",
-    )
     server_url: str = Field(
         default="http://127.0.0.1:8001",
         description="Base server URL for REST API authentication",
