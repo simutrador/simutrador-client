@@ -4,7 +4,7 @@ Unit tests for CLI session commands.
 
 from datetime import datetime
 from decimal import Decimal
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch, MagicMock
 
 import pytest
 
@@ -284,7 +284,9 @@ class TestCLISessionIntegration:
             "100000.0",
         ]
 
-        with patch("simutrador_client.cli._run_session_create", return_value=0):
+        with patch(
+            "simutrador_client.cli._run_session_create", new=MagicMock(return_value=0)
+        ):
             with patch("asyncio.run", return_value=0) as mock_asyncio_run:
                 result = main(args)
 
@@ -295,7 +297,9 @@ class TestCLISessionIntegration:
         """Test main function with session status command."""
         args = ["session", "status", "sess_abc123"]
 
-        with patch("simutrador_client.cli._run_session_status", return_value=0):
+        with patch(
+            "simutrador_client.cli._run_session_status", new=MagicMock(return_value=0)
+        ):
             with patch("asyncio.run", return_value=0) as mock_asyncio_run:
                 result = main(args)
 
@@ -306,10 +310,10 @@ class TestCLISessionIntegration:
         """Test main function with session list command."""
         args = ["session", "list"]
 
-        with patch("simutrador_client.cli._run_session_list") as mock_run:
-            mock_run.return_value = 0
-            with patch("asyncio.run") as mock_asyncio_run:
-                mock_asyncio_run.return_value = 0
+        with patch(
+            "simutrador_client.cli._run_session_list", new=MagicMock(return_value=0)
+        ):
+            with patch("asyncio.run", return_value=0) as mock_asyncio_run:
                 result = main(args)
 
                 assert result == 0
@@ -319,10 +323,10 @@ class TestCLISessionIntegration:
         """Test main function with session delete command."""
         args = ["session", "delete", "sess_abc123"]
 
-        with patch("simutrador_client.cli._run_session_delete") as mock_run:
-            mock_run.return_value = 0
-            with patch("asyncio.run") as mock_asyncio_run:
-                mock_asyncio_run.return_value = 0
+        with patch(
+            "simutrador_client.cli._run_session_delete", new=MagicMock(return_value=0)
+        ):
+            with patch("asyncio.run", return_value=0) as mock_asyncio_run:
                 result = main(args)
 
                 assert result == 0
