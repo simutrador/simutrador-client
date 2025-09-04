@@ -6,6 +6,7 @@ Python client SDK for SimuTrador.
 
 *   ✅ Implemented: WebSocket health check CLI and config via environment/.env
 *   ✅ Implemented: Authentication (JWT token exchange, CLI auth commands)
+*   ✅ Implemented: Session management (create, status, list, delete simulation sessions)
 *   Pending: Additional API commands, WebSocket simulation commands
 
 ### Installation
@@ -31,6 +32,15 @@ cp .env.sample .env
 *   `AUTH__API_KEY=sk_your_api_key_here` - Your SimuTrador API key (makes --api-key optional)
 *   `AUTH__SERVER_URL=http://127.0.0.1:8001` - Server URL for authentication (makes --server-url optional)
 *   `AUTH__TOKEN=` - JWT token (automatically managed, don't set manually)
+
+#### Session Configuration
+
+*   `SESSION__DEFAULT_INITIAL_CAPITAL=100000.00` - Default initial capital for new sessions
+*   `SESSION__DEFAULT_DATA_PROVIDER=polygon` - Default data provider for sessions
+*   `SESSION__DEFAULT_COMMISSION_PER_SHARE=0.005` - Default commission per share
+*   `SESSION__DEFAULT_SLIPPAGE_BPS=5` - Default slippage in basis points
+*   `SESSION__SESSION_TIMEOUT_SECONDS=30` - Timeout for session operations
+*   `SESSION__MAX_RETRY_ATTEMPTS=3` - Maximum retry attempts for session operations
 
 #### Advanced Configuration
 
@@ -103,19 +113,78 @@ Token expires in: 3600 seconds
 Token cached for WebSocket connections
 ```
 
+#### Session Management Commands
+
+**Create a new simulation session**:
+
+```
+$ uv run simutrador-client session create AAPL GOOGL MSFT \
+  --start-date 2023-01-01 \
+  --end-date 2023-12-31 \
+  --initial-capital 100000.0
+✅ Session created successfully!
+Session ID: sess_abc123def456
+Status: created
+Symbols: AAPL, GOOGL, MSFT
+```
+
+**Check session status**:
+
+```
+$ uv run simutrador-client session status sess_abc123def456
+Session ID: sess_abc123def456
+Status: ready
+User ID: user_123
+Symbols: AAPL, GOOGL, MSFT
+Start Date: 2023-01-01
+End Date: 2023-12-31
+Initial Capital: 100000.00
+```
+
+**List all your sessions**:
+
+```
+$ uv run simutrador-client session list
+Found 2 session(s):
+
+Session ID: sess_abc123def456
+  Status: ready
+  Symbols: AAPL, GOOGL, MSFT
+  Start Date: 2023-01-01
+  End Date: 2023-12-31
+  Created: 2023-01-01T10:00:00Z
+
+Session ID: sess_def456ghi789
+  Status: running
+  Symbols: TSLA
+  Start Date: 2023-06-01
+  End Date: 2023-12-31
+  Created: 2023-01-02T14:30:00Z
+```
+
+**Delete a session**:
+
+```
+$ uv run simutrador-client session delete sess_abc123def456
+✅ Session sess_abc123def456 deleted successfully!
+```
+
+**Session creation with custom parameters**:
+
+```
+$ uv run simutrador-client session create AAPL \
+  --start-date 2023-01-01 \
+  --end-date 2023-12-31 \
+  --initial-capital 50000.0 \
+  --data-provider polygon \
+  --commission-per-share 0.01 \
+  --slippage-bps 10
+```
+
 ### Development
 
 *   Lint: uv run ruff check --fix src/
 *   Type check: uv run pyright src/
 *   Tests: uv run pytest -q
-
-### Future: Authentication
-
-We will introduce authentication settings and CLI options. Placeholders in .env.sample:
-
-*   AUTH\_\_TOKEN=
-*   AUTH\_\_API\_KEY=
-
-Once implemented, documented precedence will apply similarly (CLI > env > defaults).
 
 Python client SDK for SimuTrador.
