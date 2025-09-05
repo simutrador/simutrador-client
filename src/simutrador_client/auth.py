@@ -116,9 +116,8 @@ class AuthClient:
 
         # Check if token is expired (with 5 minute buffer)
         now = datetime.now(timezone.utc)
-        if now >= self._token_expires_at.replace(
-            minute=self._token_expires_at.minute - 5
-        ):
+        buffer_time = timedelta(minutes=5)
+        if now >= (self._token_expires_at - buffer_time):
             self._cached_token = None
             self._token_expires_at = None
             return None
