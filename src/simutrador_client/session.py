@@ -32,7 +32,7 @@ class SessionError(Exception):
 class SessionClient:
     """Client for handling session operations with SimuTrador server."""
 
-    def __init__(self, server_url: str | None = None, timeout: float = 30.0):
+    def __init__(self, server_url: str | None = None, timeout: float = 10.0):
         """
         Initialize session client.
 
@@ -195,12 +195,29 @@ class SessionClient:
         """
         # Get authenticated WebSocket URL
         base_ws_url = self._settings.server.websocket.url
-        ws_url = self._auth_client.get_websocket_url(f"{base_ws_url}/ws/session")
+        ws_url = self._auth_client.get_websocket_url(f"{base_ws_url}/ws/simulate")
 
         logger.debug("Connecting to WebSocket: %s", ws_url)
 
         try:
             async with websockets.connect(ws_url) as websocket:
+                # First, receive and handle connection_ready message
+                try:
+                    connection_ready_raw = await asyncio.wait_for(
+                        websocket.recv(), timeout=self.timeout
+                    )
+                    connection_ready_data = json.loads(connection_ready_raw)
+                    if connection_ready_data.get("type") == "connection_ready":
+                        logger.debug("Received connection_ready message")
+                    else:
+                        logger.warning(
+                            "Expected connection_ready, got: %s",
+                            connection_ready_data.get("type"),
+                        )
+                except asyncio.TimeoutError:
+                    logger.error("Timeout waiting for connection_ready message")
+                    raise SessionError("Timeout waiting for connection_ready message")
+
                 # Send message
                 message_json = message.model_dump_json()
                 await websocket.send(message_json)

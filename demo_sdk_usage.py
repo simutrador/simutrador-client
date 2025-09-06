@@ -34,7 +34,7 @@ from typing import Dict, List, Optional
 
 # Configure logging for demo visibility
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("simutrador_demo")
 
@@ -172,7 +172,7 @@ class SimuTraderDemo:
             logger.info("🔨 Creating new simulation session...")
 
             session_data = await self.session_client.create_session(
-                symbols=["AAPL", "GOOGL", "MSFT"],
+                symbols=["AAPL"],
                 start_date=datetime(2023, 1, 1),
                 end_date=datetime(2023, 12, 31),
                 initial_capital=Decimal("100000.00"),
@@ -184,8 +184,10 @@ class SimuTraderDemo:
             )
 
             session_id = session_data.get("session_id")
+            logger.debug("Session creation response: %s", session_data)
             if not session_id:
                 logger.error("❌ Session creation failed - no session ID returned")
+                logger.error("Response data: %s", session_data)
                 return False
 
             self.created_sessions.append(session_id)
