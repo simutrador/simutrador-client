@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
+
 import websockets
 from simutrador_core.models.websocket import HealthStatus, WSMessage
 from simutrador_core.utils import get_default_logger

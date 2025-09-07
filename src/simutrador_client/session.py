@@ -13,7 +13,6 @@ from __future__ import annotations
 # from datetime import datetime
 # from decimal import Decimal
 # from typing import Any, Dict, List, Optional, AsyncIterator
-
 # import websockets
 # from simutrador_core.models.websocket import WSMessage
 from simutrador_core.utils import get_default_logger
