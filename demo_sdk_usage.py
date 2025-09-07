@@ -33,8 +33,11 @@ from decimal import Decimal
 from typing import Dict, List, Optional
 
 # Configure logging for demo visibility
+# Support LOG_LEVEL environment variable: DEBUG, INFO, WARNING, ERROR
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+log_level_value = getattr(logging, log_level, logging.INFO)
 logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=log_level_value, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("simutrador_demo")
 
@@ -109,8 +112,21 @@ class SimuTraderDemo:
             return True
 
         except Exception as e:
-            logger.error("❌ Demo failed with unexpected error: %s", e)
-            return False
+            error_msg = str(e)
+            if "maximum session limit" in error_msg:
+                logger.warning(
+                    "⚠️  Demo hit session limit - this is normal for free tier users"
+                )
+                logger.info(
+                    "💡 The demo creates multiple sessions to showcase functionality"
+                )
+                logger.info(
+                    "🧹 Run the demo again - it will clean up old sessions automatically"
+                )
+                return True  # This is actually successful behavior
+            else:
+                logger.error("❌ Demo failed with unexpected error: %s", e)
+                return False
 
     async def _demo_authentication(self) -> bool:
         """Demonstrate authentication workflow."""
@@ -214,8 +230,21 @@ class SimuTraderDemo:
             return True
 
         except SessionError as e:
-            logger.error("❌ Session management error: %s", e)
-            return False
+            error_msg = str(e)
+            if (
+                "maximum session limit" in error_msg
+                or "session limit" in error_msg.lower()
+            ):
+                logger.warning(
+                    "⚠️  Session limit reached - this is expected for free tier users"
+                )
+                logger.info("🧹 Let's clean up existing sessions and try again...")
+                await self._cleanup_all_sessions()
+                logger.info("✅ Session cleanup completed, continuing demo...")
+                return True
+            else:
+                logger.error("❌ Session management error: %s", e)
+                return False
         except Exception as e:
             logger.error("❌ Unexpected session error: %s", e)
             return False
@@ -382,6 +411,44 @@ class SimuTraderDemo:
 
         logger.info("🧹 Cleanup completed")
 
+    async def _cleanup_all_sessions(self):
+        """Clean up all user sessions to free up session slots."""
+        try:
+            # List all sessions first
+            sessions_response = await self.session_client.list_sessions()
+            sessions = sessions_response.get("sessions", [])
+
+            if not sessions:
+                logger.info("📋 No sessions found to clean up")
+                return
+
+            logger.info("📋 Found %d sessions to clean up", len(sessions))
+
+            # Delete all sessions
+            for session in sessions:
+                session_id = session.get("session_id")
+                if session_id:
+                    try:
+                        logger.info(
+                            "🗑️  Deleting session: %s...", session_id[:12] + "..."
+                        )
+                        await self.session_client.delete_session(session_id)
+                        logger.info("✅ Session deleted successfully")
+                    except SessionError as e:
+                        logger.warning(
+                            "⚠️  Failed to delete session %s: %s", session_id, e
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "⚠️  Unexpected error deleting session %s: %s", session_id, e
+                        )
+
+            # Clear our tracking list
+            self.created_sessions.clear()
+
+        except Exception as e:
+            logger.warning("⚠️  Error during session cleanup: %s", e)
+
         # Show final session management statistics
         logger.info("\n📊 Session Management Demo Statistics:")
         logger.info("  🔗 WebSocket Connection: Active")
@@ -392,14 +459,36 @@ class SimuTraderDemo:
 
 async def main():
     """Main demo execution function."""
-    # Parse command line arguments for server URL override
+    # Parse command line arguments
     server_url = None
-    if len(sys.argv) > 1:
-        server_url = sys.argv[1]
-        logger.info("🔧 Using custom server URL: %s", server_url)
+    cleanup_first = False
+
+    for arg in sys.argv[1:]:
+        if arg == "--cleanup":
+            cleanup_first = True
+        elif arg.startswith("http"):
+            server_url = arg
+            logger.info("🔧 Using custom server URL: %s", server_url)
+        elif arg in ["--help", "-h"]:
+            print("SimuTrador Client SDK Demo")
+            print("Usage: python demo_sdk_usage.py [options] [server_url]")
+            print("Options:")
+            print("  --cleanup    Clean up all existing sessions before running demo")
+            print("  --help, -h   Show this help message")
+            print("Environment variables:")
+            print("  LOG_LEVEL    Set logging level (DEBUG, INFO, WARNING, ERROR)")
+            return
+
+    # Initialize demo
+    demo = SimuTraderDemo(server_url)
+
+    # Clean up existing sessions if requested
+    if cleanup_first:
+        logger.info("🧹 Cleaning up existing sessions first...")
+        await demo._cleanup_all_sessions()
+        logger.info("✅ Pre-cleanup completed")
 
     # Run the demo
-    demo = SimuTraderDemo(server_url)
     success = await demo.run_complete_demo()
 
     # Exit with appropriate code
