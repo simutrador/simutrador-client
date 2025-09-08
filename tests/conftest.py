@@ -5,6 +5,7 @@ Sets up test environment and fixtures.
 """
 
 import asyncio
+import contextlib
 import faulthandler
 import sys
 import threading
@@ -86,3 +87,73 @@ def leak_detector():
     except RuntimeError:
         # No running loop; nothing to report
         pass
+
+
+# Session-level safety net: ensure all server-side WebSockets are closed
+# even if individual tests forget to close their clients/contexts.
+@pytest.fixture(scope="session", autouse=True)
+def ensure_websocket_server_cleanup():
+    """On test session end, gracefully close any remaining WS connections.
+
+    We spin up a short-lived TestClient so we can call async close methods
+    on the server's event loop using its portal.
+    """
+    yield
+
+    try:
+        from fastapi.testclient import TestClient
+        from simutrador_server.websocket_server import websocket_app
+        from simutrador_server.websocket.connection_manager import (
+            get_connection_manager,
+        )
+
+        conn_manager = get_connection_manager()
+        stats = conn_manager.get_connection_stats()
+        user_ids = list(stats.get("connections_per_user", {}).keys())
+
+        # Use TestClient portal to run async cleanup in app loop
+        try:
+            with TestClient(websocket_app) as client:
+                for user_id in user_ids:
+                    try:
+                        client.portal.call(
+                            conn_manager.cleanup_user_connections_async, user_id
+                        )
+                    except Exception:
+                        # Fallback to reference cleanup
+                        conn_manager.cleanup_user_connections(user_id)
+        except Exception:
+            # As a last resort, attempt best-effort reference cleanup without portal
+            for user_id in user_ids:
+                with contextlib.suppress(Exception):
+                    conn_manager.cleanup_user_connections(user_id)
+    except Exception:
+        # Never fail session teardown
+        pass
+
+
+# Session-level: ensure background services/executors are shut down (prevents hang at exit)
+@pytest.fixture(scope="session", autouse=True)
+def ensure_services_shutdown():
+    yield
+    try:
+        # Prefer using the existing instance if created; avoid creating one just to shut it down
+        from simutrador_server.services import session_manager as sm_mod
+
+        sm = getattr(sm_mod, "_session_manager", None)
+        if sm is not None:
+            with contextlib.suppress(Exception):
+                sm.shutdown(wait=False)
+    except Exception:
+        pass
+
+
+# Session-end stall watchdog: if pytest stalls during global teardown, dump stacks after 20s
+@pytest.fixture(scope="session", autouse=True)
+def session_stall_watchdog():
+    try:
+        yield
+    finally:
+        t = threading.Timer(20.0, lambda: faulthandler.dump_traceback(file=sys.stderr))
+        t.daemon = True
+        t.start()
