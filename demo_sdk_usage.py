@@ -15,11 +15,10 @@ Requirements:
 
 This demo covers:
     ✅ Authentication workflow with JWT tokens
-    ✅ Complete session management (create, status, list, delete) via WebSocket
-    ✅ Advanced session configurations (commission, slippage, metadata)
-    ✅ Error handling and validation scenarios
-    ✅ Multi-session workflows and cleanup operations
-    🔄 Future: Trading operations (place orders, portfolio management)
+    ✅ Server-managed session creation via WebSocket (start_simulation)
+    ✅ Validation and error handling via WebSocket responses
+    ✅ Automatic cleanup on disconnect (no manual deletes)
+    🔄 Future: Trading operations on the same persistent WebSocket
     🔄 Future: Market data streaming
     🔄 Future: Strategy execution framework
 """
@@ -28,9 +27,11 @@ import asyncio
 import logging
 import os
 import sys
-from datetime import datetime, timedelta
-from decimal import Decimal
-from typing import Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+import json
+
+import websockets
 
 # Configure logging for demo visibility
 # Support LOG_LEVEL environment variable: DEBUG, INFO, WARNING, ERROR
@@ -44,7 +45,7 @@ logger = logging.getLogger("simutrador_demo")
 # Import SimuTrador client components
 try:
     from simutrador_client.auth import get_auth_client, AuthenticationError
-    from simutrador_client.session import get_session_client, SessionError
+    from simutrador_client.session import get_session_client
     from simutrador_client.settings import get_settings
 except ImportError as e:
     logger.error("Failed to import SimuTrador client: %s", e)
@@ -71,9 +72,12 @@ class SimuTraderDemo:
         """
         self.server_url = server_url
         self.auth_client = get_auth_client(server_url)
-        self.session_client = get_session_client(server_url)
+        self.session_client = get_session_client(
+            server_url
+        )  # retained for compatibility
         self.settings = get_settings()
         self.created_sessions: List[str] = []
+        self._last_ws_session_id: Optional[str] = None
 
         logger.info("🚀 SimuTrador SDK Demo initialized")
         logger.info("📡 Server URL: %s", self.auth_client.server_url)
@@ -94,18 +98,14 @@ class SimuTraderDemo:
             if not await self._demo_authentication():
                 return False
 
-            # Step 2: Session Management
+            # Step 2: Start simulation (server-managed session via WebSocket)
             if not await self._demo_session_management():
                 return False
 
-            # Step 3: Advanced Session Operations
-            if not await self._demo_advanced_session_operations():
-                return False
-
-            # Step 4: Error Handling & Validation Demo
+            # Step 3: Error Handling & Validation Demo (via WebSocket)
             await self._demo_error_handling()
 
-            # Step 5: Cleanup
+            # Step 4: Cleanup (sessions auto-cleaned on disconnect)
             await self._demo_cleanup()
 
             logger.info("✅ All demo operations completed successfully!")
@@ -178,149 +178,104 @@ class SimuTraderDemo:
             logger.error("❌ Unexpected authentication error: %s", e)
             return False
 
+    def _build_ws_url(self) -> str:
+        base = self.settings.server.websocket.url.rstrip("/")
+        path = "/ws/simulate"
+        return self.auth_client.get_websocket_url(f"{base}{path}")
+
     async def _demo_session_management(self) -> bool:
-        """Demonstrate basic session management operations."""
-        logger.info("\n📋 STEP 2: Session Management")
+        """Start a simulation via WebSocket (server-managed sessions)."""
+        logger.info(
+            "\n📋 STEP 2: Start Simulation (Server-managed Session via WebSocket)"
+        )
         logger.info("-" * 40)
 
         try:
-            # Create a new session
-            logger.info("🔨 Creating new simulation session...")
+            ws_url = self._build_ws_url()
+            logger.info("🔌 Connecting to WebSocket: %s", ws_url)
+            async with websockets.connect(ws_url, ping_interval=None) as ws:
+                # Prepare start_simulation message
+                payload = {
+                    "type": "start_simulation",
+                    "request_id": "demo-1",
+                    "data": {
+                        "symbols": ["AAPL"],
+                        "start_date": datetime(
+                            2023, 1, 1, tzinfo=timezone.utc
+                        ).isoformat(),
+                        "end_date": datetime(
+                            2023, 12, 31, tzinfo=timezone.utc
+                        ).isoformat(),
+                        "initial_capital": 100000.0,
+                        "metadata": {
+                            "strategy": "demo_strategy",
+                            "version": "1.0",
+                            "description": "SDK Demo Session",
+                        },
+                    },
+                }
 
-            session_data = await self.session_client.create_session(
-                symbols=["AAPL"],
-                start_date=datetime(2023, 1, 1),
-                end_date=datetime(2023, 12, 31),
-                initial_capital=Decimal("100000.00"),
-                metadata={
-                    "strategy": "demo_strategy",
-                    "version": "1.0",
-                    "description": "SDK Demo Session",
-                },
-            )
+                logger.info("▶️  Sending start_simulation message...")
+                await ws.send(json.dumps(payload))
 
-            session_id = session_data.get("session_id")
-            logger.debug("Session creation response: %s", session_data)
-            if not session_id:
-                logger.error("❌ Session creation failed - no session ID returned")
-                logger.error("Response data: %s", session_data)
-                return False
+                # Wait for session_created response, skipping initial connection events
+                expected_request_id = payload["request_id"]
+                session_msg: Optional[Dict[str, Any]] = None
+                for _ in range(10):  # allow a few out-of-band messages
+                    raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                    msg = json.loads(raw)
+                    logger.debug("WS response: %s", msg)
+                    msg_type = msg.get("type")
+                    # Skip server handshake/heartbeat messages or unrelated request_ids
+                    if msg_type in {"connection_ready", "ping", "heartbeat"}:
+                        continue
+                    if msg.get("request_id") not in (None, expected_request_id):
+                        continue
+                    if msg_type == "session_created":
+                        session_msg = msg
+                        break
+                    if msg_type in {"error", "validation_error"}:
+                        logger.error("❌ Server returned error: %s", msg)
+                        return False
+                if session_msg is None:
+                    logger.error("❌ Timed out waiting for session_created response")
+                    return False
 
-            self.created_sessions.append(session_id)
-            logger.info("✅ Session created successfully!")
-            logger.info("🆔 Session ID: %s", session_id)
-            logger.info("📊 Status: %s", session_data.get("status", "Unknown"))
+                session = session_msg.get("data", {})
+                session_id = session.get("session_id")
+                if not session_id:
+                    logger.error("❌ No session_id in session_created response")
+                    return False
 
-            # Get session status
-            logger.info("\n🔍 Retrieving session status...")
-            status_data = await self.session_client.get_session_status(session_id)
+                self._last_ws_session_id = session_id
+                self.created_sessions.append(session_id)
+                logger.info("✅ Session created successfully!")
+                logger.info("🆔 Session ID: %s", session_id)
 
-            logger.info("✅ Session status retrieved:")
-            logger.info("  📈 Symbols: %s", ", ".join(status_data.get("symbols", [])))
-            logger.info(
-                "  📅 Period: %s to %s",
-                status_data.get("start_date", "Unknown"),
-                status_data.get("end_date", "Unknown"),
-            )
-            logger.info(
-                "  💰 Initial Capital: $%s",
-                status_data.get("initial_capital", "Unknown"),
-            )
+                warnings = (session_msg.get("meta") or {}).get("warnings") or []
+                if warnings:
+                    logger.info("⚠️  Validation warnings: %s", warnings)
 
-            return True
+                # Optionally listen briefly for follow-up messages
+                try:
+                    raw2 = await asyncio.wait_for(ws.recv(), timeout=2)
+                    logger.info("ℹ️  Additional message: %s", raw2)
+                except asyncio.TimeoutError:
+                    logger.info("⏳ No additional messages yet (as expected for demo)")
 
-        except SessionError as e:
-            error_msg = str(e)
-            if (
-                "maximum session limit" in error_msg
-                or "session limit" in error_msg.lower()
-            ):
-                logger.warning(
-                    "⚠️  Session limit reached - this is expected for free tier users"
-                )
-                logger.info("🧹 Let's clean up existing sessions and try again...")
-                await self._cleanup_all_sessions()
-                logger.info("✅ Session cleanup completed, continuing demo...")
+                # Connection context manager will close WS, triggering server cleanup
                 return True
-            else:
-                logger.error("❌ Session management error: %s", e)
-                return False
+
         except Exception as e:
-            logger.error("❌ Unexpected session error: %s", e)
+            logger.error("❌ WebSocket session error: %s", e)
             return False
 
     async def _demo_advanced_session_operations(self) -> bool:
-        """Demonstrate advanced session operations."""
-        logger.info("\n📋 STEP 3: Advanced Session Operations")
+        """Advanced operations are shifting to server-managed flow; skipping."""
+        logger.info("\n📋 STEP 3: Advanced Session Operations (skipped in new model)")
         logger.info("-" * 40)
-
-        try:
-            # Create multiple sessions with different configurations
-            logger.info(
-                "🔨 Creating multiple sessions with different configurations..."
-            )
-
-            # High-frequency trading session
-            hft_session = await self.session_client.create_session(
-                symbols=["SPY", "QQQ", "IWM"],
-                start_date=datetime(2023, 6, 1),
-                end_date=datetime(2023, 8, 31),
-                initial_capital=Decimal("50000.00"),
-                commission_per_share=Decimal("0.001"),  # Low commission for HFT
-                slippage_bps=1,  # Low slippage
-                metadata={
-                    "strategy": "high_frequency_demo",
-                    "frequency": "1min",
-                    "risk_level": "high",
-                },
-            )
-
-            hft_session_id = hft_session.get("session_id")
-            self.created_sessions.append(hft_session_id)
-            logger.info("✅ HFT Session: %s", hft_session_id)
-
-            # Long-term investment session
-            longterm_session = await self.session_client.create_session(
-                symbols=["BRK.B", "JNJ", "PG", "KO"],
-                start_date=datetime(2020, 1, 1),
-                end_date=datetime(2023, 12, 31),
-                initial_capital=Decimal("200000.00"),
-                commission_per_share=Decimal("0.01"),  # Higher commission for long-term
-                slippage_bps=10,  # Higher slippage acceptable
-                metadata={
-                    "strategy": "buy_and_hold_demo",
-                    "frequency": "daily",
-                    "risk_level": "low",
-                },
-            )
-
-            longterm_session_id = longterm_session.get("session_id")
-            self.created_sessions.append(longterm_session_id)
-            logger.info("✅ Long-term Session: %s", longterm_session_id)
-
-            # List all sessions
-            logger.info("\n📋 Listing all user sessions...")
-            sessions_data = await self.session_client.list_sessions()
-            sessions = sessions_data.get("sessions", [])
-
-            logger.info("✅ Found %d session(s):", len(sessions))
-            for i, session in enumerate(sessions, 1):
-                logger.info(
-                    "  %d. %s (%s) - %s symbols",
-                    i,
-                    session.get("session_id", "Unknown")[:12] + "...",
-                    session.get("status", "Unknown"),
-                    len(session.get("symbols", [])),
-                )
-
-            return True
-
-        except SessionError as e:
-            logger.error("❌ Advanced session operations error: %s", e)
-            return False
-        except Exception as e:
-            logger.error("❌ Unexpected error in advanced operations: %s", e)
-            return False
+        await asyncio.sleep(0)
+        return True
 
     async def _demo_error_handling(self):
         """Demonstrate error handling and validation scenarios."""
@@ -328,63 +283,77 @@ class SimuTraderDemo:
         logger.info("-" * 40)
         logger.info("🧪 Testing error scenarios to showcase robust error handling...")
 
+        # Use one-off WS connections for validation tests
+        async def send_and_log(payload: Dict[str, Any], label: str) -> None:
+            try:
+                ws_url = self._build_ws_url()
+                async with websockets.connect(ws_url, ping_interval=None) as ws:
+                    await ws.send(json.dumps(payload))
+                    # Read until we get a relevant response (skip handshake/heartbeat)
+                    selected = None
+                    for _ in range(5):
+                        raw = await asyncio.wait_for(ws.recv(), timeout=5)
+                        msg = json.loads(raw)
+                        if msg.get("type") in {"connection_ready", "ping", "heartbeat"}:
+                            continue
+                        selected = msg
+                        break
+                    if selected is not None:
+                        logger.info("%s response: %s", label, json.dumps(selected))
+                    else:
+                        logger.info("%s response: <no relevant message>", label)
+            except Exception as e:
+                logger.info("%s raised as expected: %s", label, e)
+
         # Test 1: Invalid symbols
-        try:
-            logger.info("\n🧪 Test 1: Creating session with invalid symbols...")
-            await self.session_client.create_session(
-                symbols=["INVALID_SYMBOL", "ANOTHER_BAD_SYMBOL"],
-                start_date=datetime(2023, 1, 1),
-                end_date=datetime(2023, 12, 31),
-                initial_capital=Decimal("10000.00"),
-            )
-            logger.warning("⚠️  Expected validation error but session was created")
-        except SessionError as e:
-            logger.info("✅ Correctly caught invalid symbols error: %s", e)
-        except Exception as e:
-            logger.warning("⚠️  Unexpected error type: %s", e)
+        logger.info("\n🧪 Test 1: Creating session with invalid symbols...")
+        await send_and_log(
+            {
+                "type": "start_simulation",
+                "request_id": "demo-invalid-symbols",
+                "data": {
+                    "symbols": ["INVALID_SYMBOL", "ANOTHER_BAD_SYMBOL"],
+                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc).isoformat(),
+                    "end_date": datetime(2023, 12, 31, tzinfo=timezone.utc).isoformat(),
+                    "initial_capital": 10000.0,
+                },
+            },
+            "Invalid symbols",
+        )
 
         # Test 2: Invalid date range
-        try:
-            logger.info("\n🧪 Test 2: Creating session with invalid date range...")
-            await self.session_client.create_session(
-                symbols=["AAPL"],
-                start_date=datetime(2023, 12, 31),  # Start after end
-                end_date=datetime(2023, 1, 1),
-                initial_capital=Decimal("10000.00"),
-            )
-            logger.warning("⚠️  Expected date validation error but session was created")
-        except SessionError as e:
-            logger.info("✅ Correctly caught invalid date range error: %s", e)
-        except Exception as e:
-            logger.warning("⚠️  Unexpected error type: %s", e)
-
-        # Test 3: Access non-existent session
-        try:
-            logger.info("\n🧪 Test 3: Accessing non-existent session...")
-            fake_session_id = "00000000-0000-0000-0000-000000000000"
-            await self.session_client.get_session_status(fake_session_id)
-            logger.warning("⚠️  Expected session not found error but got response")
-        except SessionError as e:
-            logger.info("✅ Correctly caught session not found error: %s", e)
-        except Exception as e:
-            logger.warning("⚠️  Unexpected error type: %s", e)
+        logger.info("\n🧪 Test 2: Creating session with invalid date range...")
+        await send_and_log(
+            {
+                "type": "start_simulation",
+                "request_id": "demo-invalid-dates",
+                "data": {
+                    "symbols": ["AAPL"],
+                    "start_date": datetime(
+                        2023, 12, 31, tzinfo=timezone.utc
+                    ).isoformat(),
+                    "end_date": datetime(2023, 1, 1, tzinfo=timezone.utc).isoformat(),
+                    "initial_capital": 10000.0,
+                },
+            },
+            "Invalid dates",
+        )
 
         # Test 4: Invalid capital amount
-        try:
-            logger.info("\n🧪 Test 4: Creating session with invalid capital...")
-            await self.session_client.create_session(
-                symbols=["AAPL"],
-                start_date=datetime(2023, 1, 1),
-                end_date=datetime(2023, 12, 31),
-                initial_capital=Decimal("-1000.00"),  # Negative capital
-            )
-            logger.warning(
-                "⚠️  Expected capital validation error but session was created"
-            )
-        except SessionError as e:
-            logger.info("✅ Correctly caught invalid capital error: %s", e)
-        except Exception as e:
-            logger.warning("⚠️  Unexpected error type: %s", e)
+        logger.info("\n🧪 Test 3: Creating session with invalid capital...")
+        await send_and_log(
+            {
+                "type": "start_simulation",
+                "request_id": "demo-invalid-capital",
+                "data": {
+                    "symbols": ["AAPL"],
+                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc).isoformat(),
+                    "end_date": datetime(2023, 12, 31, tzinfo=timezone.utc).isoformat(),
+                    "initial_capital": -1000.0,
+                },
+            },
+            "Invalid capital",
+        )
 
         logger.info("\n✅ Error handling demonstration completed!")
         logger.info(
@@ -395,66 +364,29 @@ class SimuTraderDemo:
         """Demonstrate session cleanup operations."""
         logger.info("\n📋 STEP 5: Cleanup Operations")
         logger.info("-" * 40)
+        await asyncio.sleep(0)
 
-        # Delete created sessions
-        for session_id in self.created_sessions:
-            try:
-                logger.info("🗑️  Deleting session: %s...", session_id[:12] + "...")
-                await self.session_client.delete_session(session_id)
-                logger.info("✅ Session deleted successfully")
-            except SessionError as e:
-                logger.warning("⚠️  Failed to delete session %s: %s", session_id, e)
-            except Exception as e:
-                logger.warning(
-                    "⚠️  Unexpected error deleting session %s: %s", session_id, e
-                )
-
-        logger.info("🧹 Cleanup completed")
+        # No explicit cleanup needed; server cleans sessions when WS disconnects
+        if self._last_ws_session_id:
+            logger.info(
+                "🧹 Sessions are server-managed and cleaned up on disconnect (last: %s)",
+                self._last_ws_session_id[:12] + "...",
+            )
+        else:
+            logger.info("🧹 No sessions to clean up explicitly (server-managed)")
 
     async def _cleanup_all_sessions(self):
         """Clean up all user sessions to free up session slots."""
-        try:
-            # List all sessions first
-            sessions_response = await self.session_client.list_sessions()
-            sessions = sessions_response.get("sessions", [])
-
-            if not sessions:
-                logger.info("📋 No sessions found to clean up")
-                return
-
-            logger.info("📋 Found %d sessions to clean up", len(sessions))
-
-            # Delete all sessions
-            for session in sessions:
-                session_id = session.get("session_id")
-                if session_id:
-                    try:
-                        logger.info(
-                            "🗑️  Deleting session: %s...", session_id[:12] + "..."
-                        )
-                        await self.session_client.delete_session(session_id)
-                        logger.info("✅ Session deleted successfully")
-                    except SessionError as e:
-                        logger.warning(
-                            "⚠️  Failed to delete session %s: %s", session_id, e
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "⚠️  Unexpected error deleting session %s: %s", session_id, e
-                        )
-
-            # Clear our tracking list
-            self.created_sessions.clear()
-
-        except Exception as e:
-            logger.warning("⚠️  Error during session cleanup: %s", e)
+        await asyncio.sleep(0)
+        # In the new model, explicit listing/deletion is not required here.
+        self.created_sessions.clear()
 
         # Show final session management statistics
         logger.info("\n📊 Session Management Demo Statistics:")
-        logger.info("  🔗 WebSocket Connection: Active")
+        logger.info("  🔗 WebSocket Connection: Closed (server cleaned up session)")
         logger.info("  📝 Sessions Created: %d", len(self.created_sessions))
-        logger.info("  🧪 Error Scenarios Tested: 4")
-        logger.info("  ✅ All Operations: Successful")
+        logger.info("  🧪 Error Scenarios Tested: 3")
+        logger.info("  ✅ Operations Completed")
 
 
 async def main():
@@ -494,15 +426,11 @@ async def main():
     # Exit with appropriate code
     if success:
         logger.info("\n🎉 Demo completed successfully!")
-        logger.info("📚 This demo showcases complete session management capabilities:")
-        logger.info(
-            "  ✅ WebSocket-based session operations (create, get, list, delete)"
-        )
-        logger.info("  ✅ Advanced session configurations and metadata")
-        logger.info("  ✅ Comprehensive error handling and validation")
-        logger.info("  ✅ Multi-session workflows and cleanup operations")
-        logger.info("🚀 Session management (Task 4) is now production-ready!")
-        logger.info("🔄 Next: Trading operations and market data streaming...")
+        logger.info("📚 This demo showcases server-managed session flow:")
+        logger.info("  ✅ WebSocket start_simulation with server-side session creation")
+        logger.info("  ✅ Validation and error handling via WebSocket responses")
+        logger.info("  ✅ Automatic cleanup on disconnect (no manual deletes)")
+        logger.info("🔄 Next: trading ops and streaming on the same persistent WS")
         sys.exit(0)
     else:
         logger.error("\n💥 Demo failed!")
