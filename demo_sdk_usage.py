@@ -63,7 +63,7 @@ class SimuTraderDemo:
     client SDK, from authentication to session management.
     """
 
-    def __init__(self, server_url: Optional[str] = None):
+    def __init__(self, server_url: Optional[str] = None, interactive: bool = True):
         """
         Initialize the demo with optional server URL override.
 
@@ -78,6 +78,8 @@ class SimuTraderDemo:
         self.settings = get_settings()
         self.created_sessions: List[str] = []
         self._last_ws_session_id: Optional[str] = None
+
+        self.interactive = interactive
 
         logger.info("🚀 SimuTrador SDK Demo initialized")
         logger.info("📡 Server URL: %s", self.auth_client.server_url)
@@ -98,14 +100,31 @@ class SimuTraderDemo:
             if not await self._demo_authentication():
                 return False
 
+            # Confirm proceed to Step 2
+            if not await self._confirm("Proceed to STEP 2: Start Simulation?"):
+                logger.info("⏹️ Demo stopped by user after STEP 1.")
+                return True
+
             # Step 2: Start simulation (server-managed session via WebSocket)
             if not await self._demo_session_management():
                 return False
 
-            # Step 3: Error Handling & Validation Demo (via WebSocket)
+            # Confirm proceed to Step 4 (Error Handling)
+            if not await self._confirm(
+                "Proceed to STEP 4: Error Handling & Validation?"
+            ):
+                logger.info("⏹️ Demo stopped by user after STEP 2.")
+                return True
+
+            # Step 4: Error Handling & Validation Demo (via WebSocket)
             await self._demo_error_handling()
 
-            # Step 4: Cleanup (sessions auto-cleaned on disconnect)
+            # Confirm proceed to Step 5 (Cleanup)
+            if not await self._confirm("Proceed to STEP 5: Cleanup?"):
+                logger.info("⏹️ Demo stopped by user after STEP 4.")
+                return True
+
+            # Step 5: Cleanup (sessions auto-cleaned on disconnect)
             await self._demo_cleanup()
 
             logger.info("✅ All demo operations completed successfully!")
@@ -182,6 +201,29 @@ class SimuTraderDemo:
         base = self.settings.server.websocket.url.rstrip("/")
         path = "/ws/simulate"
         return self.auth_client.get_websocket_url(f"{base}{path}")
+
+    async def _confirm(self, prompt: str, default_yes: bool = True) -> bool:
+        """Ask the user to confirm before proceeding.
+
+        If interactive is False, always return True.
+        """
+        if not self.interactive:
+            return True
+        suffix = "[Y/n]" if default_yes else "[y/N]"
+        while True:
+            try:
+                resp = await asyncio.to_thread(input, f"{prompt} {suffix} ")
+            except EOFError:
+                # Non-interactive terminal; assume default
+                return default_yes
+            r = (resp or "").strip().lower()
+            if r == "":
+                return default_yes
+            if r in ("y", "yes"):
+                return True
+            if r in ("n", "no"):
+                return False
+            print("Please answer 'y' or 'n'.")
 
     async def _demo_session_management(self) -> bool:
         """Start a simulation via WebSocket (server-managed sessions)."""
@@ -388,16 +430,108 @@ class SimuTraderDemo:
         logger.info("  🧪 Error Scenarios Tested: 3")
         logger.info("  ✅ Operations Completed")
 
+    async def _stress_test_parallel_sessions(self, count: int = 8) -> None:
+        """Attempt to start many sessions concurrently to observe rate limiting.
+
+        Args:
+            count: Number of concurrent start_simulation attempts (default 8)
+        """
+        logger.info(
+            "\n📋 STEP (Optional): Parallel session stress test (%d attempts)", count
+        )
+        logger.info("-" * 40)
+
+        ws_url = self._build_ws_url()
+
+        async def start_one(idx: int) -> str:
+            req_id = f"stress-{idx}"
+            payload = {
+                "type": "start_simulation",
+                "request_id": req_id,
+                "data": {
+                    "symbols": ["AAPL"],
+                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc).isoformat(),
+                    "end_date": datetime(2023, 12, 31, tzinfo=timezone.utc).isoformat(),
+                    "initial_capital": 10000.0,
+                    "metadata": {"source": "stress_test", "idx": idx},
+                },
+            }
+            try:
+                async with websockets.connect(ws_url, ping_interval=None) as ws:
+                    await ws.send(json.dumps(payload))
+                    # Read a few messages to find relevant response
+                    for _ in range(6):
+                        raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                        msg = json.loads(raw)
+                        msg_type = msg.get("type")
+                        if msg_type in {"connection_ready", "ping", "heartbeat"}:
+                            continue
+                        # If the server responds with errors
+                        if msg_type in {"error", "validation_error"}:
+                            # Try to detect rate limiting from payload fields/code/message
+                            code = (msg.get("meta") or {}).get("code") or msg.get(
+                                "code"
+                            )
+                            detail = (msg.get("data") or {}).get("detail") or msg.get(
+                                "message"
+                            )
+                            text = f"{code or ''} {detail or ''}".lower()
+                            if "rate" in text and (
+                                "limit" in text or "limited" in text
+                            ):
+                                return "rate_limited"
+                            return "error"
+                        if msg_type == "session_created":
+                            return "created"
+                    return "timeout"
+            except Exception as e:
+                # A connection error may indicate rate limiting at connection-level
+                emsg = str(e).lower()
+                if "1008" in emsg or (
+                    "rate" in emsg and ("limit" in emsg or "limited" in emsg)
+                ):
+                    return "rate_limited"
+                return "connect_error"
+
+        tasks = [asyncio.create_task(start_one(i)) for i in range(count)]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+
+        # Summarize results
+        from collections import Counter
+
+        counts = Counter(results)
+        logger.info("\n📊 Stress test summary (count=%d):", count)
+        for key in ["created", "rate_limited", "error", "connect_error", "timeout"]:
+            if counts.get(key):
+                logger.info("  %-14s %d", key + ":", counts[key])
+        if not any(counts.values()):
+            logger.info("  (no results)")
+
+        # Simple assessment
+        if counts.get("rate_limited", 0) > 0:
+            logger.info(
+                "✅ Rate limiting appears to be active (some attempts were limited)."
+            )
+        else:
+            logger.info("ℹ️  No explicit rate limiting observed in this run.")
+
 
 async def main():
     """Main demo execution function."""
     # Parse command line arguments
     server_url = None
     cleanup_first = False
+    assume_yes = False
+    rate_limit_count = 0  # 0 disables stress test; >0 runs with given count
 
     for arg in sys.argv[1:]:
         if arg == "--cleanup":
             cleanup_first = True
+        elif arg == "--yes":
+            assume_yes = True
+        elif arg.startswith("--rate-limit"):
+            parts = arg.split("=", 1)
+            rate_limit_count = 8 if len(parts) == 1 else int(parts[1] or 8)
         elif arg.startswith("http"):
             server_url = arg
             logger.info("🔧 Using custom server URL: %s", server_url)
@@ -405,14 +539,20 @@ async def main():
             print("SimuTrador Client SDK Demo")
             print("Usage: python demo_sdk_usage.py [options] [server_url]")
             print("Options:")
-            print("  --cleanup    Clean up all existing sessions before running demo")
-            print("  --help, -h   Show this help message")
+            print(
+                "  --cleanup           Clean up all existing sessions before running demo"
+            )
+            print("  --yes               Run non-interactive (auto-confirm steps)")
+            print(
+                "  --rate-limit[=N]    Run parallel session stress test with N attempts (default 8)"
+            )
+            print("  --help, -h          Show this help message")
             print("Environment variables:")
             print("  LOG_LEVEL    Set logging level (DEBUG, INFO, WARNING, ERROR)")
             return
 
     # Initialize demo
-    demo = SimuTraderDemo(server_url)
+    demo = SimuTraderDemo(server_url, interactive=not assume_yes)
 
     # Clean up existing sessions if requested
     if cleanup_first:
@@ -422,6 +562,19 @@ async def main():
 
     # Run the demo
     success = await demo.run_complete_demo()
+
+    # Optional: run stress test for server rate limiting (after optional cleanup)
+    if rate_limit_count > 0:
+        if not assume_yes:
+            proceed = await demo._confirm(
+                f"Run parallel session stress test with {rate_limit_count} attempts?"
+            )
+            if not proceed:
+                logger.info("⏹️ Skipping stress test by user choice.")
+            else:
+                await demo._stress_test_parallel_sessions(rate_limit_count)
+        else:
+            await demo._stress_test_parallel_sessions(rate_limit_count)
 
     # Exit with appropriate code
     if success:
