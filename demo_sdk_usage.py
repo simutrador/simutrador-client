@@ -24,12 +24,12 @@ This demo covers:
 """
 
 import asyncio
+import json
 import logging
 import os
 import sys
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-import json
+from typing import Any, Dict, List, Optional, cast
 
 import websockets
 
@@ -44,14 +44,13 @@ logger = logging.getLogger("simutrador_demo")
 
 # Import SimuTrador client components
 try:
-    from simutrador_client.auth import get_auth_client, AuthenticationError
+    from simutrador_client.auth import AuthenticationError, get_auth_client
     from simutrador_client.session import get_session_client
     from simutrador_client.settings import get_settings
 except ImportError as e:
     logger.error("Failed to import SimuTrador client: %s", e)
-    logger.error(
-        "Make sure you're running from the simutrador-client directory with: uv run python demo_sdk_usage.py"
-    )
+    logger.error("Make sure you're running from the simutrador-client directory with:")
+    logger.error("  uv run python demo_sdk_usage.py")
     sys.exit(1)
 
 
@@ -294,9 +293,12 @@ class SimuTraderDemo:
                 logger.info("✅ Session created successfully!")
                 logger.info("🆔 Session ID: %s", session_id)
 
-                warnings = (session_msg.get("meta") or {}).get("warnings") or []
-                if warnings:
-                    logger.info("⚠️  Validation warnings: %s", warnings)
+                meta: Dict[str, Any] = cast(
+                    Dict[str, Any], session_msg.get("meta") or {}
+                )
+                warnings_list: List[Any] = cast(List[Any], meta.get("warnings") or [])
+                if warnings_list:
+                    logger.info("⚠️  Validation warnings: %s", warnings_list)
 
                 # Optionally listen briefly for follow-up messages
                 try:
@@ -469,13 +471,17 @@ class SimuTraderDemo:
                         # If the server responds with errors
                         if msg_type in {"error", "validation_error"}:
                             # Try to detect rate limiting from payload fields/code/message
-                            code = (msg.get("meta") or {}).get("code") or msg.get(
-                                "code"
+                            meta: Dict[str, Any] = cast(
+                                Dict[str, Any], msg.get("meta") or {}
                             )
-                            detail = (msg.get("data") or {}).get("detail") or msg.get(
-                                "message"
+                            data: Dict[str, Any] = cast(
+                                Dict[str, Any], msg.get("data") or {}
                             )
-                            text = f"{code or ''} {detail or ''}".lower()
+                            code: str = str(meta.get("code") or msg.get("code") or "")
+                            detail: str = str(
+                                data.get("detail") or msg.get("message") or ""
+                            )
+                            text = f"{code} {detail}".lower()
                             if "rate" in text and (
                                 "limit" in text or "limited" in text
                             ):
@@ -515,6 +521,90 @@ class SimuTraderDemo:
         else:
             logger.info("ℹ️  No explicit rate limiting observed in this run.")
 
+    async def _stress_test_message_burst(
+        self, count: int = 10, interval_ms: int = 0
+    ) -> None:
+        """Send a burst of start_simulation messages over one WS
+        to observe message-level rate limiting."""
+        logger.info(
+            "\n📋 STEP (Optional): Message burst rate limit test (count=%d, interval_ms=%d)",
+            count,
+            interval_ms,
+        )
+        logger.info("-" * 40)
+
+        ws_url = self._build_ws_url()
+        RATE_LIMIT_MARKER = "RATE_LIMITED"
+        observed_rate_limited = False
+
+        try:
+            async with websockets.connect(ws_url, ping_interval=None) as ws:
+                # Drain initial handshake message(s) if any
+                try:
+                    raw0 = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                    try:
+                        _ = json.loads(raw0)
+                    except Exception:
+                        pass
+                except asyncio.TimeoutError:
+                    pass
+
+                for i in range(count):
+                    payload = {
+                        "type": "start_simulation",
+                        "request_id": f"msg-burst-{i}",
+                        "data": {
+                            "symbols": ["AAPL"],
+                            "start_date": datetime(
+                                2023, 1, 1, tzinfo=timezone.utc
+                            ).isoformat(),
+                            "end_date": datetime(
+                                2023, 1, 31, tzinfo=timezone.utc
+                            ).isoformat(),
+                            "initial_capital": 10000.0,
+                        },
+                    }
+                    await ws.send(json.dumps(payload))
+
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=1.5)
+                        msg = json.loads(raw)
+                        if isinstance(msg, dict):
+                            m: Dict[str, Any] = cast(Dict[str, Any], msg)
+                            if m.get("type") == "error":
+                                blob = json.dumps(
+                                    {
+                                        "data": m.get("data"),
+                                        "meta": m.get("meta"),
+                                        "message": m.get("message"),
+                                    }
+                                ).upper()
+                                if RATE_LIMIT_MARKER in blob:
+                                    observed_rate_limited = True
+                                    logger.info(
+                                        "✅ Observed RATE_LIMITED error on message %d",
+                                        i,
+                                    )
+                                    break
+                    except asyncio.TimeoutError:
+                        pass
+
+                    if interval_ms > 0:
+                        await asyncio.sleep(interval_ms / 1000.0)
+        except Exception as e:
+            reason = str(e)
+            if RATE_LIMIT_MARKER in reason:
+                observed_rate_limited = True
+                logger.info(
+                    "✅ Observed RATE_LIMITED via connection close/handshake: %s",
+                    reason,
+                )
+            else:
+                logger.info("Connection error during burst: %s", reason)
+
+        if not observed_rate_limited:
+            logger.info("ℹ️  No explicit RATE_LIMITED observed in this burst run.")
+
 
 async def main():
     """Main demo execution function."""
@@ -522,7 +612,9 @@ async def main():
     server_url = None
     cleanup_first = False
     assume_yes = False
-    rate_limit_count = 0  # 0 disables stress test; >0 runs with given count
+    rate_limit_count = 0  # 0 disables connection stress test; >0 runs with given count
+    rate_msg_count = 0  # 0 disables message-burst test; >0 sends that many messages
+    msg_interval_ms = 0  # inter-message delay for burst
 
     for arg in sys.argv[1:]:
         if arg == "--cleanup":
@@ -532,6 +624,14 @@ async def main():
         elif arg.startswith("--rate-limit"):
             parts = arg.split("=", 1)
             rate_limit_count = 8 if len(parts) == 1 else int(parts[1] or 8)
+        elif arg.startswith("--rate-messages"):
+            parts = arg.split("=", 1)
+            rate_msg_count = 10 if len(parts) == 1 else int(parts[1] or 10)
+        elif arg.startswith("--msg-interval-ms="):
+            try:
+                msg_interval_ms = int(arg.split("=", 1)[1] or 0)
+            except Exception:
+                msg_interval_ms = 0
         elif arg.startswith("http"):
             server_url = arg
             logger.info("🔧 Using custom server URL: %s", server_url)
@@ -539,14 +639,16 @@ async def main():
             print("SimuTrador Client SDK Demo")
             print("Usage: python demo_sdk_usage.py [options] [server_url]")
             print("Options:")
+            print("  --cleanup             Clean up sessions before running demo")
+            print("  --yes                 Run non-interactive (auto-confirm steps)")
             print(
-                "  --cleanup           Clean up all existing sessions before running demo"
+                "  --rate-limit[=N]      Parallel WS stress test (default 8 attempts)"
             )
-            print("  --yes               Run non-interactive (auto-confirm steps)")
             print(
-                "  --rate-limit[=N]    Run parallel session stress test with N attempts (default 8)"
+                "  --rate-messages[=M]   Burst of M start_simulation messages (default 10)"
             )
-            print("  --help, -h          Show this help message")
+            print("  --msg-interval-ms=K   Delay between messages in ms (default 0)")
+            print("  --help, -h            Show this help message")
             print("Environment variables:")
             print("  LOG_LEVEL    Set logging level (DEBUG, INFO, WARNING, ERROR)")
             return
@@ -557,8 +659,37 @@ async def main():
     # Clean up existing sessions if requested
     if cleanup_first:
         logger.info("🧹 Cleaning up existing sessions first...")
-        await demo._cleanup_all_sessions()
+        await demo._cleanup_all_sessions()  # type: ignore[reportPrivateUsage]
         logger.info("✅ Pre-cleanup completed")
+    # Optional: run message-burst test for message-level rate limiting
+    if "rate_msg_count" in locals() and rate_msg_count > 0:
+        # Ensure authentication before building WS URL
+        try:
+            if not demo.auth_client.is_authenticated():
+                api_key = os.getenv("AUTH__API_KEY") or demo.settings.auth.api_key
+                if not api_key:
+                    raise AuthenticationError("No API key available for authentication")
+                await demo.auth_client.login(api_key)
+        except Exception as e:
+            logger.error("Skipping message-burst test; authentication failed: %s", e)
+        else:
+            if not assume_yes:
+                proceed = await demo._confirm(  # type: ignore[reportPrivateUsage]
+                    "Send a burst of %d messages to test message-level rate limiting?"
+                    % rate_msg_count
+                )
+                if proceed:
+                    await demo._stress_test_message_burst(  # type: ignore[reportPrivateUsage]
+                        rate_msg_count,
+                        msg_interval_ms,
+                    )
+                else:
+                    logger.info("⏹️ Skipping message-burst test by user choice.")
+            else:
+                await demo._stress_test_message_burst(  # type: ignore[reportPrivateUsage]
+                    rate_msg_count,
+                    msg_interval_ms,
+                )
 
     # Run the demo
     success = await demo.run_complete_demo()
@@ -566,15 +697,15 @@ async def main():
     # Optional: run stress test for server rate limiting (after optional cleanup)
     if rate_limit_count > 0:
         if not assume_yes:
-            proceed = await demo._confirm(
+            proceed = await demo._confirm(  # type: ignore[reportPrivateUsage]
                 f"Run parallel session stress test with {rate_limit_count} attempts?"
             )
             if not proceed:
                 logger.info("⏹️ Skipping stress test by user choice.")
             else:
-                await demo._stress_test_parallel_sessions(rate_limit_count)
+                await demo._stress_test_parallel_sessions(rate_limit_count)  # type: ignore[reportPrivateUsage]
         else:
-            await demo._stress_test_parallel_sessions(rate_limit_count)
+            await demo._stress_test_parallel_sessions(rate_limit_count)  # type: ignore[reportPrivateUsage]
 
     # Exit with appropriate code
     if success:
