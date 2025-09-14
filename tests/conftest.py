@@ -89,47 +89,12 @@ def leak_detector():
         pass
 
 
-# Session-level safety net: ensure all server-side WebSockets are closed
-# even if individual tests forget to close their clients/contexts.
+# Client-side cleanup - no server-side dependencies needed
 @pytest.fixture(scope="session", autouse=True)
-def ensure_websocket_server_cleanup():
-    """On test session end, gracefully close any remaining WS connections.
-
-    We spin up a short-lived TestClient so we can call async close methods
-    on the server's event loop using its portal.
-    """
+def ensure_client_cleanup():
+    """Clean up any client-side resources after test session."""
     yield
-
-    try:
-        from fastapi.testclient import TestClient
-        from simutrador_server.websocket_server import websocket_app
-        from simutrador_server.websocket.connection_manager import (
-            get_connection_manager,
-        )
-
-        conn_manager = get_connection_manager()
-        stats = conn_manager.get_connection_stats()
-        user_ids = list(stats.get("connections_per_user", {}).keys())
-
-        # Use TestClient portal to run async cleanup in app loop
-        try:
-            with TestClient(websocket_app) as client:
-                for user_id in user_ids:
-                    try:
-                        client.portal.call(
-                            conn_manager.cleanup_user_connections_async, user_id
-                        )
-                    except Exception:
-                        # Fallback to reference cleanup
-                        conn_manager.cleanup_user_connections(user_id)
-        except Exception:
-            # As a last resort, attempt best-effort reference cleanup without portal
-            for user_id in user_ids:
-                with contextlib.suppress(Exception):
-                    conn_manager.cleanup_user_connections(user_id)
-    except Exception:
-        # Never fail session teardown
-        pass
+    # Client-specific cleanup can be added here if needed
 
 
 # Session-level: ensure background services/executors are shut down (prevents hang at exit)
