@@ -606,24 +606,182 @@ class SimuTraderDemo:
             logger.info("ℹ️  No explicit RATE_LIMITED observed in this burst run.")
 
 
+def _is_rate_limited_exception(exc: Exception) -> bool:
+    s = str(exc)
+    s_lower = s.lower()
+    return (
+        "429" in s
+        or "too many requests" in s_lower
+        or "retry-after" in s_lower
+        or ("rate" in s_lower and ("limit" in s_lower or "limited" in s_lower))
+    )
+
+
+class _HeldWS:
+    def __init__(self, ws):
+        self.ws = ws
+
+    async def close(self) -> None:
+        try:
+            await self.ws.close()
+        except Exception:
+            pass
+
+
+async def _recv_until_session_created(ws) -> str | None:
+    try:
+        for _ in range(10):
+            raw = await asyncio.wait_for(ws.recv(), timeout=10)
+            msg = json.loads(raw)
+            mtype = msg.get("type")
+            if mtype in {"connection_ready", "ping", "heartbeat"}:
+                continue
+            if mtype == "session_created":
+                data = cast(Dict[str, Any], msg.get("data") or {})
+                return cast(Optional[str], data.get("session_id"))
+            if mtype in {"error", "validation_error", "session_error"}:
+                logger.error("Session error during hold setup: %s", msg)
+                return None
+        return None
+    except Exception as e:
+        logger.error("Error waiting for session_created: %s", e)
+        return None
+
+
+async def _open_and_hold_one(ws_url: str, idx: int) -> _HeldWS | None:
+    try:
+        ws = await websockets.connect(ws_url, ping_interval=None)
+    except Exception as e:
+        logger.error("Failed to open WS %d: %s", idx, e)
+        return None
+
+    payload = {
+        "type": "start_simulation",
+        "request_id": f"cap-hold-{idx}",
+        "data": {
+            "symbols": ["AAPL"],
+            "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc).isoformat(),
+            "end_date": datetime(2023, 12, 31, tzinfo=timezone.utc).isoformat(),
+            "initial_capital": 10000.0,
+            "metadata": {"source": "cap_hold", "idx": idx},
+        },
+    }
+    try:
+        await ws.send(json.dumps(payload))
+        sid = await _recv_until_session_created(ws)
+        if sid:
+            logger.info("Opened session %d: %s", idx, sid)
+        else:
+            logger.warning("Session %d did not report session_created", idx)
+    except Exception as e:
+        logger.error("Error during session %d setup: %s", idx, e)
+        try:
+            await ws.close()
+        except Exception:
+            pass
+        return None
+
+    return _HeldWS(ws)
+
+
+async def demo_connection_cap_hold(demo: "SimuTraderDemo", hold_sec: int = 10) -> None:
+    """Open 2 sessions, keep them open, then attempt a 3rd to trigger plan cap.
+
+    This avoids the pre-auth handshake limiter by not opening all connections at once.
+    The third connection should be denied at handshake by the plan's concurrent limit
+    (HTTP 429 Too Many Requests with Retry-After).
+    """
+    logger.info("\n📋 Demo: Connection cap with held sessions (hold=%ds)", hold_sec)
+    logger.info("-" * 40)
+
+    # Ensure we are authenticated
+    if not demo.auth_client.is_authenticated():
+        api_key = os.getenv("AUTH__API_KEY") or demo.settings.auth.api_key
+        if not api_key:
+            logger.error("No API key available; cannot run connection-cap demo")
+            return
+        await demo.auth_client.login(api_key)
+
+    ws_url = demo._build_ws_url()
+
+    # Open first two connections sequentially and keep them open
+    ws1 = await _open_and_hold_one(ws_url, 1)
+    if ws1 is None:
+        logger.error("Could not establish first session; aborting demo.")
+        return
+
+    ws2 = await _open_and_hold_one(ws_url, 2)
+    if ws2 is None:
+        logger.error("Could not establish second session; closing first and aborting.")
+        await ws1.close()
+        return
+
+    logger.info(
+        "Holding 2 sessions open; attempting a 3rd connection to trigger plan cap..."
+    )
+
+    # Attempt third connection while first two are held open
+
+    try:
+        ws3 = await websockets.connect(ws_url, ping_interval=None)
+
+        try:
+            await ws3.close()
+        except Exception:
+            pass
+    except Exception as e:
+        logger.info("Third connection handshake denied (expected): %s", e)
+        if _is_rate_limited_exception(e):
+            logger.info(
+                "✅ Observed handshake rate limiting (likely HTTP 429 Too Many Requests)."
+            )
+        else:
+            logger.info(
+                "ℹ️  Handshake denied without explicit 429 marker; enable DEBUG to inspect raw handshake."
+            )
+
+    # Keep the two sessions open briefly so it's visible in server metrics/logs
+    try:
+        await asyncio.sleep(max(0, int(hold_sec)))
+    finally:
+        await ws2.close()
+        await ws1.close()
+        logger.info("Closed held sessions.")
+
+
 async def main():
     """Main demo execution function."""
     # Parse command line arguments
     server_url = None
     cleanup_first = False
-    assume_yes = False
-    rate_limit_count = 0  # 0 disables connection stress test; >0 runs with given count
+    interactive = True  # Default to interactive mode
+    concurrent_sessions_count = (
+        0  # 0 disables concurrent sessions test; >0 runs with given count
+    )
     rate_msg_count = 0  # 0 disables message-burst test; >0 sends that many messages
     msg_interval_ms = 0  # inter-message delay for burst
+    demo_connection_cap_hold_sec = (
+        0  # 0 disables; >0 runs connection-cap demo holding 2 sessions
+    )
 
     for arg in sys.argv[1:]:
         if arg == "--cleanup":
             cleanup_first = True
-        elif arg == "--yes":
-            assume_yes = True
-        elif arg.startswith("--rate-limit"):
+        elif arg.startswith("--interactive"):
             parts = arg.split("=", 1)
-            rate_limit_count = 8 if len(parts) == 1 else int(parts[1] or 8)
+            if len(parts) == 1:
+                interactive = True  # --interactive with no value defaults to True
+            else:
+                value = parts[1].lower()
+                interactive = value in ("y", "yes", "true", "1")
+        elif arg.startswith("--concurrent-sessions"):
+            parts = arg.split("=", 1)
+            concurrent_sessions_count = 8 if len(parts) == 1 else int(parts[1] or 8)
+        elif arg.startswith("--demo-connection-cap"):
+            parts = arg.split("=", 1)
+            demo_connection_cap_hold_sec = (
+                10 if len(parts) == 1 else int(parts[1] or 10)
+            )
         elif arg.startswith("--rate-messages"):
             parts = arg.split("=", 1)
             rate_msg_count = 10 if len(parts) == 1 else int(parts[1] or 10)
@@ -640,9 +798,12 @@ async def main():
             print("Usage: python demo_sdk_usage.py [options] [server_url]")
             print("Options:")
             print("  --cleanup             Clean up sessions before running demo")
-            print("  --yes                 Run non-interactive (auto-confirm steps)")
+            print("  --interactive[=Y/N]   Interactive mode (default Y)")
             print(
-                "  --rate-limit[=N]      Parallel WS stress test (default 8 attempts)"
+                "  --concurrent-sessions[=N]  Open N concurrent WS sessions (default 8)"
+            )
+            print(
+                "  --demo-connection-cap[=S]  Hold 2 sessions, attempt 3rd; hold S seconds (default 10)"
             )
             print(
                 "  --rate-messages[=M]   Burst of M start_simulation messages (default 10)"
@@ -654,7 +815,7 @@ async def main():
             return
 
     # Initialize demo
-    demo = SimuTraderDemo(server_url, interactive=not assume_yes)
+    demo = SimuTraderDemo(server_url, interactive=interactive)
 
     # Clean up existing sessions if requested
     if cleanup_first:
@@ -673,7 +834,7 @@ async def main():
         except Exception as e:
             logger.error("Skipping message-burst test; authentication failed: %s", e)
         else:
-            if not assume_yes:
+            if interactive:
                 proceed = await demo._confirm(  # type: ignore[reportPrivateUsage]
                     "Send a burst of %d messages to test message-level rate limiting?"
                     % rate_msg_count
@@ -694,18 +855,31 @@ async def main():
     # Run the demo
     success = await demo.run_complete_demo()
 
-    # Optional: run stress test for server rate limiting (after optional cleanup)
-    if rate_limit_count > 0:
-        if not assume_yes:
+    # Optional: demonstrate plan connection cap by holding two sessions
+    if demo_connection_cap_hold_sec > 0:
+        if interactive:
             proceed = await demo._confirm(  # type: ignore[reportPrivateUsage]
-                f"Run parallel session stress test with {rate_limit_count} attempts?"
+                f"Run connection-cap demo (hold {demo_connection_cap_hold_sec}s, attempt 3rd)?"
+            )
+            if proceed:
+                await demo_connection_cap_hold(demo, demo_connection_cap_hold_sec)
+            else:
+                logger.info("⏹️ Skipping connection-cap demo by user choice.")
+        else:
+            await demo_connection_cap_hold(demo, demo_connection_cap_hold_sec)
+
+    # Optional: run concurrent sessions test (after optional cleanup)
+    if concurrent_sessions_count > 0:
+        if interactive:
+            proceed = await demo._confirm(  # type: ignore[reportPrivateUsage]
+                f"Run concurrent sessions test with {concurrent_sessions_count} sessions?"
             )
             if not proceed:
-                logger.info("⏹️ Skipping stress test by user choice.")
+                logger.info("⏹️ Skipping concurrent sessions test by user choice.")
             else:
-                await demo._stress_test_parallel_sessions(rate_limit_count)  # type: ignore[reportPrivateUsage]
+                await demo._stress_test_parallel_sessions(concurrent_sessions_count)  # type: ignore[reportPrivateUsage]
         else:
-            await demo._stress_test_parallel_sessions(rate_limit_count)  # type: ignore[reportPrivateUsage]
+            await demo._stress_test_parallel_sessions(concurrent_sessions_count)  # type: ignore[reportPrivateUsage]
 
     # Exit with appropriate code
     if success:
