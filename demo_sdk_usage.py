@@ -53,6 +53,11 @@ except ImportError as e:
     logger.error("  uv run python demo_sdk_usage.py")
     sys.exit(1)
 
+# Flow modules (menu options)
+from demo_flows.normal import run as run_normal_flow
+from demo_flows.rate_limits import run as run_rate_limits_flow
+from demo_flows.invalid_inputs import run as run_invalid_inputs_flow
+
 
 class SimuTraderDemo:
     """
@@ -224,6 +229,66 @@ class SimuTraderDemo:
                 return False
             print("Please answer 'y' or 'n'.")
 
+    def _log_connection_ready(self, msg: Dict[str, Any]) -> None:
+        """Log server handshake information and any advertised limits."""
+        try:
+            meta: Dict[str, Any] = cast(Dict[str, Any], msg.get("meta") or {})
+            limits: Dict[str, Any] = cast(
+                Dict[str, Any], meta.get("limits") or msg.get("limits") or {}
+            )
+            logger.info("🔗 Connection ready: handshake received")
+            plan = meta.get("plan") or meta.get("plan_name")
+            if plan:
+                logger.info("  🧾 Plan: %s", plan)
+            if limits:
+                # Show common fields if present; otherwise print the full limits blob
+                known_keys = [
+                    "concurrent_sessions",
+                    "max_concurrent",
+                    "message_rate",
+                    "burst",
+                    "window_ms",
+                    "preauth_connections",
+                    "pre_auth_connections",
+                ]
+                pretty = {k: limits[k] for k in known_keys if k in limits}
+                if pretty:
+                    logger.info("  📈 Limits: %s", pretty)
+                else:
+                    logger.info("  📈 Limits: %s", limits)
+        except Exception:
+            # Never fail the demo due to logging issues
+            pass
+
+    def _log_ws_error_context(self, msg: Dict[str, Any]) -> None:
+        """Log useful error context such as code and retry-after hints."""
+        try:
+            meta: Dict[str, Any] = cast(Dict[str, Any], msg.get("meta") or {})
+            data: Dict[str, Any] = cast(Dict[str, Any], msg.get("data") or {})
+            code = str(meta.get("code") or msg.get("code") or data.get("code") or "")
+            message = str(
+                msg.get("message") or data.get("detail") or data.get("message") or ""
+            )
+            retry_after = (
+                meta.get("retry_after")
+                or meta.get("retry_after_seconds")
+                or meta.get("retry_after_ms")
+                or data.get("retry_after")
+                or data.get("retry_after_seconds")
+                or data.get("retry_after_ms")
+            )
+            if code or message:
+                logger.info("🛑 Error code=%s message=%s", code, message)
+            if retry_after is not None:
+                try:
+                    ra = float(retry_after)
+                    ra_sec = ra / 1000.0 if ra > 1000 else ra
+                    logger.info("⏳ Retry after approximately %.2f seconds", ra_sec)
+                except Exception:
+                    logger.info("⏳ Retry after: %s", retry_after)
+        except Exception:
+            pass
+
     async def _demo_session_management(self) -> bool:
         """Start a simulation via WebSocket (server-managed sessions)."""
         logger.info(
@@ -267,8 +332,15 @@ class SimuTraderDemo:
                     msg = json.loads(raw)
                     logger.debug("WS response: %s", msg)
                     msg_type = msg.get("type")
-                    # Skip server handshake/heartbeat messages or unrelated request_ids
-                    if msg_type in {"connection_ready", "ping", "heartbeat"}:
+                    # Handle server handshake/heartbeat messages or unrelated request_ids
+                    if msg_type == "connection_ready":
+                        # Log handshake info/limits if provided by server
+                        try:
+                            self._log_connection_ready(msg)
+                        except Exception:
+                            pass
+                        continue
+                    if msg_type in {"ping", "heartbeat"}:
                         continue
                     if msg.get("request_id") not in (None, expected_request_id):
                         continue
@@ -276,6 +348,7 @@ class SimuTraderDemo:
                         session_msg = msg
                         break
                     if msg_type in {"error", "validation_error"}:
+                        self._log_ws_error_context(msg)
                         logger.error("❌ Server returned error: %s", msg)
                         return False
                 if session_msg is None:
@@ -477,13 +550,43 @@ class SimuTraderDemo:
                             data: Dict[str, Any] = cast(
                                 Dict[str, Any], msg.get("data") or {}
                             )
-                            code: str = str(meta.get("code") or msg.get("code") or "")
-                            detail: str = str(
-                                data.get("detail") or msg.get("message") or ""
+                            code: str = str(
+                                meta.get("code")
+                                or msg.get("code")
+                                or data.get("code")
+                                or ""
                             )
+                            detail: str = str(
+                                data.get("detail")
+                                or msg.get("message")
+                                or data.get("message")
+                                or ""
+                            )
+                            # Extract retry-after hints if present
+                            retry_after = (
+                                meta.get("retry_after")
+                                or meta.get("retry_after_seconds")
+                                or meta.get("retry_after_ms")
+                                or data.get("retry_after")
+                                or data.get("retry_after_seconds")
+                                or data.get("retry_after_ms")
+                            )
+                            if retry_after is not None:
+                                try:
+                                    ra = float(retry_after)
+                                    ra_sec = ra / 1000.0 if ra > 1000 else ra
+                                    logger.debug(
+                                        "Rate-limit hint: retry after ~%.2fs", ra_sec
+                                    )
+                                except Exception:
+                                    logger.debug(
+                                        "Rate-limit hint: retry after %s", retry_after
+                                    )
                             text = f"{code} {detail}".lower()
-                            if "rate" in text and (
-                                "limit" in text or "limited" in text
+                            if (
+                                "rate" in text
+                                and ("limit" in text or "limited" in text)
+                                or code.upper() == "RATE_LIMITED"
                             ):
                                 return "rate_limited"
                             return "error"
@@ -579,12 +682,47 @@ class SimuTraderDemo:
                                         "message": m.get("message"),
                                     }
                                 ).upper()
-                                if RATE_LIMIT_MARKER in blob:
+                                if (
+                                    RATE_LIMIT_MARKER in blob
+                                    or str(m.get("code", "")).upper()
+                                    == RATE_LIMIT_MARKER
+                                ):
                                     observed_rate_limited = True
-                                    logger.info(
-                                        "✅ Observed RATE_LIMITED error on message %d",
-                                        i,
+                                    # Try to surface retry-after hints if provided
+                                    meta2: Dict[str, Any] = cast(
+                                        Dict[str, Any], m.get("meta") or {}
                                     )
+                                    data2: Dict[str, Any] = cast(
+                                        Dict[str, Any], m.get("data") or {}
+                                    )
+                                    retry_after = (
+                                        meta2.get("retry_after")
+                                        or meta2.get("retry_after_seconds")
+                                        or meta2.get("retry_after_ms")
+                                        or data2.get("retry_after")
+                                        or data2.get("retry_after_seconds")
+                                        or data2.get("retry_after_ms")
+                                    )
+                                    if retry_after is not None:
+                                        try:
+                                            ra = float(retry_after)
+                                            ra_sec = ra / 1000.0 if ra > 1000 else ra
+                                            logger.info(
+                                                "✅ RATE_LIMITED (retry after ~%.2fs) on message %d",
+                                                ra_sec,
+                                                i,
+                                            )
+                                        except Exception:
+                                            logger.info(
+                                                "✅ RATE_LIMITED (retry after %s) on message %d",
+                                                retry_after,
+                                                i,
+                                            )
+                                    else:
+                                        logger.info(
+                                            "✅ Observed RATE_LIMITED error on message %d",
+                                            i,
+                                        )
                                     break
                     except asyncio.TimeoutError:
                         pass
@@ -606,293 +744,54 @@ class SimuTraderDemo:
             logger.info("ℹ️  No explicit RATE_LIMITED observed in this burst run.")
 
 
-def _is_rate_limited_exception(exc: Exception) -> bool:
-    s = str(exc)
-    s_lower = s.lower()
-    return (
-        "429" in s
-        or "too many requests" in s_lower
-        or "retry-after" in s_lower
-        or ("rate" in s_lower and ("limit" in s_lower or "limited" in s_lower))
-    )
-
-
-class _HeldWS:
-    def __init__(self, ws):
-        self.ws = ws
-
-    async def close(self) -> None:
-        try:
-            await self.ws.close()
-        except Exception:
-            pass
-
-
-async def _recv_until_session_created(ws) -> str | None:
-    try:
-        for _ in range(10):
-            raw = await asyncio.wait_for(ws.recv(), timeout=10)
-            msg = json.loads(raw)
-            mtype = msg.get("type")
-            if mtype in {"connection_ready", "ping", "heartbeat"}:
-                continue
-            if mtype == "session_created":
-                data = cast(Dict[str, Any], msg.get("data") or {})
-                return cast(Optional[str], data.get("session_id"))
-            if mtype in {"error", "validation_error", "session_error"}:
-                logger.error("Session error during hold setup: %s", msg)
-                return None
-        return None
-    except Exception as e:
-        logger.error("Error waiting for session_created: %s", e)
-        return None
-
-
-async def _open_and_hold_one(ws_url: str, idx: int) -> _HeldWS | None:
-    try:
-        ws = await websockets.connect(ws_url, ping_interval=None)
-    except Exception as e:
-        logger.error("Failed to open WS %d: %s", idx, e)
-        return None
-
-    payload = {
-        "type": "start_simulation",
-        "request_id": f"cap-hold-{idx}",
-        "data": {
-            "symbols": ["AAPL"],
-            "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc).isoformat(),
-            "end_date": datetime(2023, 12, 31, tzinfo=timezone.utc).isoformat(),
-            "initial_capital": 10000.0,
-            "metadata": {"source": "cap_hold", "idx": idx},
-        },
-    }
-    try:
-        await ws.send(json.dumps(payload))
-        sid = await _recv_until_session_created(ws)
-        if sid:
-            logger.info("Opened session %d: %s", idx, sid)
-        else:
-            logger.warning("Session %d did not report session_created", idx)
-    except Exception as e:
-        logger.error("Error during session %d setup: %s", idx, e)
-        try:
-            await ws.close()
-        except Exception:
-            pass
-        return None
-
-    return _HeldWS(ws)
-
-
-async def demo_connection_cap_hold(demo: "SimuTraderDemo", hold_sec: int = 10) -> None:
-    """Open 2 sessions, keep them open, then attempt a 3rd to trigger plan cap.
-
-    This avoids the pre-auth handshake limiter by not opening all connections at once.
-    The third connection should be denied at handshake by the plan's concurrent limit
-    (HTTP 429 Too Many Requests with Retry-After).
-    """
-    logger.info("\n📋 Demo: Connection cap with held sessions (hold=%ds)", hold_sec)
-    logger.info("-" * 40)
-
-    # Ensure we are authenticated
-    if not demo.auth_client.is_authenticated():
-        api_key = os.getenv("AUTH__API_KEY") or demo.settings.auth.api_key
-        if not api_key:
-            logger.error("No API key available; cannot run connection-cap demo")
-            return
-        await demo.auth_client.login(api_key)
-
-    ws_url = demo._build_ws_url()
-
-    # Open first two connections sequentially and keep them open
-    ws1 = await _open_and_hold_one(ws_url, 1)
-    if ws1 is None:
-        logger.error("Could not establish first session; aborting demo.")
-        return
-
-    ws2 = await _open_and_hold_one(ws_url, 2)
-    if ws2 is None:
-        logger.error("Could not establish second session; closing first and aborting.")
-        await ws1.close()
-        return
-
-    logger.info(
-        "Holding 2 sessions open; attempting a 3rd connection to trigger plan cap..."
-    )
-
-    # Attempt third connection while first two are held open
-
-    try:
-        ws3 = await websockets.connect(ws_url, ping_interval=None)
-
-        try:
-            await ws3.close()
-        except Exception:
-            pass
-    except Exception as e:
-        logger.info("Third connection handshake denied (expected): %s", e)
-        if _is_rate_limited_exception(e):
-            logger.info(
-                "✅ Observed handshake rate limiting (likely HTTP 429 Too Many Requests)."
-            )
-        else:
-            logger.info(
-                "ℹ️  Handshake denied without explicit 429 marker; enable DEBUG to inspect raw handshake."
-            )
-
-    # Keep the two sessions open briefly so it's visible in server metrics/logs
-    try:
-        await asyncio.sleep(max(0, int(hold_sec)))
-    finally:
-        await ws2.close()
-        await ws1.close()
-        logger.info("Closed held sessions.")
-
-
 async def main():
-    """Main demo execution function."""
-    # Parse command line arguments
+    """Menu entry point to select and run a demo flow."""
+    # Minimal CLI parsing for server URL and interactive mode
     server_url = None
-    cleanup_first = False
-    interactive = True  # Default to interactive mode
-    concurrent_sessions_count = (
-        0  # 0 disables concurrent sessions test; >0 runs with given count
-    )
-    rate_msg_count = 0  # 0 disables message-burst test; >0 sends that many messages
-    msg_interval_ms = 0  # inter-message delay for burst
-    demo_connection_cap_hold_sec = (
-        0  # 0 disables; >0 runs connection-cap demo holding 2 sessions
-    )
+    interactive = True
 
     for arg in sys.argv[1:]:
-        if arg == "--cleanup":
-            cleanup_first = True
-        elif arg.startswith("--interactive"):
+        if arg.startswith("--interactive"):
             parts = arg.split("=", 1)
             if len(parts) == 1:
-                interactive = True  # --interactive with no value defaults to True
+                interactive = True
             else:
-                value = parts[1].lower()
-                interactive = value in ("y", "yes", "true", "1")
-        elif arg.startswith("--concurrent-sessions"):
-            parts = arg.split("=", 1)
-            concurrent_sessions_count = 8 if len(parts) == 1 else int(parts[1] or 8)
-        elif arg.startswith("--demo-connection-cap"):
-            parts = arg.split("=", 1)
-            demo_connection_cap_hold_sec = (
-                10 if len(parts) == 1 else int(parts[1] or 10)
-            )
-        elif arg.startswith("--rate-messages"):
-            parts = arg.split("=", 1)
-            rate_msg_count = 10 if len(parts) == 1 else int(parts[1] or 10)
-        elif arg.startswith("--msg-interval-ms="):
-            try:
-                msg_interval_ms = int(arg.split("=", 1)[1] or 0)
-            except Exception:
-                msg_interval_ms = 0
+                interactive = parts[1].lower() in ("y", "yes", "true", "1")
         elif arg.startswith("http"):
             server_url = arg
             logger.info("🔧 Using custom server URL: %s", server_url)
         elif arg in ["--help", "-h"]:
             print("SimuTrador Client SDK Demo")
-            print("Usage: python demo_sdk_usage.py [options] [server_url]")
-            print("Options:")
-            print("  --cleanup             Clean up sessions before running demo")
-            print("  --interactive[=Y/N]   Interactive mode (default Y)")
-            print(
-                "  --concurrent-sessions[=N]  Open N concurrent WS sessions (default 8)"
-            )
-            print(
-                "  --demo-connection-cap[=S]  Hold 2 sessions, attempt 3rd; hold S seconds (default 10)"
-            )
-            print(
-                "  --rate-messages[=M]   Burst of M start_simulation messages (default 10)"
-            )
-            print("  --msg-interval-ms=K   Delay between messages in ms (default 0)")
-            print("  --help, -h            Show this help message")
-            print("Environment variables:")
-            print("  LOG_LEVEL    Set logging level (DEBUG, INFO, WARNING, ERROR)")
+            print("Usage: python demo_sdk_usage.py [--interactive[=Y/N]] [server_url]")
+            print("You will be prompted to choose a flow to run:")
+            print("  1) Normal flow (new simulation session)")
+            print("  2) Rate limits tests")
+            print("  3) Invalid input tests")
             return
 
-    # Initialize demo
     demo = SimuTraderDemo(server_url, interactive=interactive)
 
-    # Clean up existing sessions if requested
-    if cleanup_first:
-        logger.info("🧹 Cleaning up existing sessions first...")
-        await demo._cleanup_all_sessions()  # type: ignore[reportPrivateUsage]
-        logger.info("✅ Pre-cleanup completed")
-    # Optional: run message-burst test for message-level rate limiting
-    if "rate_msg_count" in locals() and rate_msg_count > 0:
-        # Ensure authentication before building WS URL
-        try:
-            if not demo.auth_client.is_authenticated():
-                api_key = os.getenv("AUTH__API_KEY") or demo.settings.auth.api_key
-                if not api_key:
-                    raise AuthenticationError("No API key available for authentication")
-                await demo.auth_client.login(api_key)
-        except Exception as e:
-            logger.error("Skipping message-burst test; authentication failed: %s", e)
-        else:
-            if interactive:
-                proceed = await demo._confirm(  # type: ignore[reportPrivateUsage]
-                    "Send a burst of %d messages to test message-level rate limiting?"
-                    % rate_msg_count
-                )
-                if proceed:
-                    await demo._stress_test_message_burst(  # type: ignore[reportPrivateUsage]
-                        rate_msg_count,
-                        msg_interval_ms,
-                    )
-                else:
-                    logger.info("⏹️ Skipping message-burst test by user choice.")
-            else:
-                await demo._stress_test_message_burst(  # type: ignore[reportPrivateUsage]
-                    rate_msg_count,
-                    msg_interval_ms,
-                )
+    print("\n=== Select a demo flow ===")
+    print("1) Normal flow (new simulation session)")
+    print("2) Rate limits tests")
+    print("3) Invalid input tests")
+    choice = (await asyncio.to_thread(input, "Select [1-3]: ")).strip()
 
-    # Run the demo
-    success = await demo.run_complete_demo()
+    if choice == "1":
+        success = await run_normal_flow(demo)
+    elif choice == "2":
+        success = await run_rate_limits_flow(demo)
+    elif choice == "3":
+        success = await run_invalid_inputs_flow(demo)
+    else:
+        logger.error("Invalid choice: %s", choice)
+        sys.exit(1)
 
-    # Optional: demonstrate plan connection cap by holding two sessions
-    if demo_connection_cap_hold_sec > 0:
-        if interactive:
-            proceed = await demo._confirm(  # type: ignore[reportPrivateUsage]
-                f"Run connection-cap demo (hold {demo_connection_cap_hold_sec}s, attempt 3rd)?"
-            )
-            if proceed:
-                await demo_connection_cap_hold(demo, demo_connection_cap_hold_sec)
-            else:
-                logger.info("⏹️ Skipping connection-cap demo by user choice.")
-        else:
-            await demo_connection_cap_hold(demo, demo_connection_cap_hold_sec)
-
-    # Optional: run concurrent sessions test (after optional cleanup)
-    if concurrent_sessions_count > 0:
-        if interactive:
-            proceed = await demo._confirm(  # type: ignore[reportPrivateUsage]
-                f"Run concurrent sessions test with {concurrent_sessions_count} sessions?"
-            )
-            if not proceed:
-                logger.info("⏹️ Skipping concurrent sessions test by user choice.")
-            else:
-                await demo._stress_test_parallel_sessions(concurrent_sessions_count)  # type: ignore[reportPrivateUsage]
-        else:
-            await demo._stress_test_parallel_sessions(concurrent_sessions_count)  # type: ignore[reportPrivateUsage]
-
-    # Exit with appropriate code
     if success:
-        logger.info("\n🎉 Demo completed successfully!")
-        logger.info("📚 This demo showcases server-managed session flow:")
-        logger.info("  ✅ WebSocket start_simulation with server-side session creation")
-        logger.info("  ✅ Validation and error handling via WebSocket responses")
-        logger.info("  ✅ Automatic cleanup on disconnect (no manual deletes)")
-        logger.info("🔄 Next: trading ops and streaming on the same persistent WS")
+        logger.info("\n🎉 Flow completed successfully!")
         sys.exit(0)
     else:
-        logger.error("\n💥 Demo failed!")
-        logger.error("🔧 Check server connectivity and authentication.")
+        logger.error("\n💥 Flow failed!")
         sys.exit(1)
 
 
