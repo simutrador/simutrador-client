@@ -19,9 +19,7 @@ This demo covers:
 
 import logging
 import sys
-from datetime import datetime, timedelta
-from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import Optional
 
 # Configure logging
 logging.basicConfig(
@@ -31,8 +29,8 @@ logger = logging.getLogger("simutrador_offline_demo")
 
 # Import SimuTrador client components
 try:
-    from simutrador_client.auth import get_auth_client, AuthenticationError
-    from simutrador_client.session import get_session_client, SessionError
+    from simutrador_client.auth import get_auth_client
+    from simutrador_client.session import get_session_client
     from simutrador_client.settings import get_settings
 except ImportError as e:
     logger.error("Failed to import SimuTrador client: %s", e)

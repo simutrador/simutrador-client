@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any
 
 
@@ -20,4 +19,3 @@ async def run(demo: Any) -> bool:
     # Step 3: Cleanup notice (server cleans sessions on disconnect)
     await demo._demo_cleanup()
     return True
-

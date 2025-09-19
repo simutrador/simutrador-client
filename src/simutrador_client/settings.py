@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from decimal import Decimal
 from functools import lru_cache
 
@@ -69,6 +70,33 @@ class ServerSettings(BaseModel):
     websocket: WebSocketSettings = Field(default_factory=WebSocketSettings)
 
 
+def _resolve_env_file() -> str | None:
+    """Determine which .env file to load.
+
+    Priority:
+    1) ENV environment variable, if set
+    2) .env in current working directory
+    3) .env found by walking up from this file's directory (up to 5 levels)
+    """
+    env_override = os.getenv("ENV")
+    if env_override:
+        return env_override
+
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.exists():
+        return str(cwd_env)
+
+    here = Path(__file__).resolve()
+    root = here
+    for _ in range(5):
+        root = root.parent
+        candidate = root / ".env"
+        if candidate.exists():
+            return str(candidate)
+
+    return None
+
+
 class ClientSettings(BaseSettings):
     """Client settings loaded from environment and optional .env file.
 
@@ -80,7 +108,7 @@ class ClientSettings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=os.getenv("ENV", ".env"),
+        env_file=_resolve_env_file(),
         env_nested_delimiter="__",
     )
 

@@ -54,9 +54,14 @@ except ImportError as e:
     sys.exit(1)
 
 # Flow modules (menu options)
-from demo_flows.normal import run as run_normal_flow
-from demo_flows.rate_limits import run as run_rate_limits_flow
-from demo_flows.invalid_inputs import run as run_invalid_inputs_flow
+try:
+    from demo.flows.normal import run as run_normal_flow
+    from demo.flows.rate_limits import run as run_rate_limits_flow
+    from demo.flows.invalid_inputs import run as run_invalid_inputs_flow
+except ModuleNotFoundError:
+    from flows.normal import run as run_normal_flow
+    from flows.rate_limits import run as run_rate_limits_flow
+    from flows.invalid_inputs import run as run_invalid_inputs_flow
 
 
 class SimuTraderDemo:
@@ -776,6 +781,8 @@ async def main():
     print("2) Rate limits tests")
     print("3) Invalid input tests")
     choice = (await asyncio.to_thread(input, "Select [1-3]: ")).strip()
+
+    success: bool = False
 
     if choice == "1":
         success = await run_normal_flow(demo)

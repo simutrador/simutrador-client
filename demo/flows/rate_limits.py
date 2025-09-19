@@ -21,8 +21,8 @@ def _is_rate_limited_exception(exc: Exception) -> bool:
 
 
 class _HeldWS:
-    def __init__(self, ws):
-        self.ws = ws
+    def __init__(self, ws: Any) -> None:
+        self.ws: Any = ws
 
     async def close(self) -> None:
         try:
@@ -47,8 +47,8 @@ async def _fetch_limits_via_handshake(demo: Any) -> Dict[str, Any]:
         ws_url = demo._build_ws_url()
         async with websockets.connect(ws_url, ping_interval=None) as ws:
             for _ in range(5):
-                raw = await asyncio.wait_for(ws.recv(), timeout=5)
-                msg = json.loads(raw)
+                raw: str | bytes = await asyncio.wait_for(ws.recv(), timeout=5)
+                msg: Dict[str, Any] = json.loads(raw)
                 if msg.get("type") == "connection_ready":
                     meta = cast(Dict[str, Any], msg.get("meta") or {})
                     limits = cast(
@@ -70,11 +70,11 @@ async def _fetch_limits_via_handshake(demo: Any) -> Dict[str, Any]:
     return info
 
 
-async def _recv_until_session_created(ws) -> Optional[str]:
+async def _recv_until_session_created(ws: Any) -> Optional[str]:
     try:
         for _ in range(10):
-            raw = await asyncio.wait_for(ws.recv(), timeout=10)
-            msg = json.loads(raw)
+            raw: str | bytes = await asyncio.wait_for(ws.recv(), timeout=10)
+            msg: Dict[str, Any] = json.loads(raw)
             mtype = msg.get("type")
             if mtype in {"connection_ready", "ping", "heartbeat"}:
                 continue
@@ -92,7 +92,7 @@ async def _recv_until_session_created(ws) -> Optional[str]:
 
 async def _open_and_hold_one(ws_url: str, idx: int) -> Optional[_HeldWS]:
     try:
-        ws = await websockets.connect(ws_url, ping_interval=None)
+        ws: Any = await websockets.connect(ws_url, ping_interval=None)
     except Exception as e:
         logger.error("Failed to open WS %d: %s", idx, e)
         return None
@@ -200,7 +200,8 @@ async def run(demo: Any) -> bool:
     # Try to fetch current plan/limits from handshake for context
     limits_info = await _fetch_limits_via_handshake(demo)
     plan = limits_info.get("plan")
-    limits = limits_info.get("limits") or {}
+    val = limits_info.get("limits")
+    limits: Dict[str, Any] = cast(Dict[str, Any], val if isinstance(val, dict) else {})
     if plan or limits:
         logger.info("\n")
         logger.info("🧭 Current server plan/limits (from handshake):")
