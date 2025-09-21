@@ -230,7 +230,7 @@ async def run(demo: Any) -> bool:
     logger.info(
         "   Purpose: exercise per-connection message/window limits (e.g., burst/window_ms)."
     )
-    burst = 10
+    burst = 80
     interval_ms = 0
     if interactive:
         burst = await _ask_int("How many messages to send?", burst)
