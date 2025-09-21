@@ -1,6 +1,16 @@
 # SimuTrador Client SDK Demo
 
 This demo script serves as **active documentation** and **end-to-end testing** for the SimuTrador client SDK. It demonstrates all currently implemented features and will be updated as new WebSocket APIs are added.
+### Related Documentation
+
+- Client README: ../README.md
+- WebSocket API v2: https://github.com/simutrador/simutrador-docs/blob/main/SimuTrador/simutrador-server/ws_api_v2.md
+- Server README: https://github.com/simutrador/simutrador-server/blob/main/README.md
+- AI Index (agent entry): ../ai-index.md
+- STATUS: ../STATUS.md
+
+
+
 
 ## 🎯 Purpose
 

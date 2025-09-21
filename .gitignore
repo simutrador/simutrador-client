@@ -211,3 +211,6 @@ __marimo__/
 
 # Local playbooks and notes (not for distribution)
 PYTEST_HANGS.md
+ai-index.md
+STATUS.md
+scripts/docs_guard.py
