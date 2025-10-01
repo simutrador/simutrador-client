@@ -214,3 +214,4 @@ PYTEST_HANGS.md
 ai-index.md
 STATUS.md
 scripts/docs_guard.py
+.gitlab_task.json
