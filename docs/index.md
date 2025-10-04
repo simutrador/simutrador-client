@@ -219,15 +219,6 @@ $ uv run simutrador-client session create AAPL \
   --slippage-bps 10
 ```
 
-### Related Documentation
-
-*   SimuTrador Architecture: https://github.com/simutrador/simutrador-docs/blob/main/SimuTrador/main.md
-*   WebSocket API v2: https://github.com/simutrador/simutrador-docs/blob/main/SimuTrador/simutrador-server/ws_api_v2.md
-*   Server (simulation engine): https://github.com/simutrador/simutrador-server/blob/main/README.md
-*   SDK Demo (active documentation): demo/DEMO\_README.md
-*   AI Index (agent entry): ai-index.md
-*   STATUS (current status/milestones): STATUS.md
-
 ### Development
 
 *   Lint: uv run ruff check --fix src/
