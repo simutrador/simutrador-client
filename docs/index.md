@@ -4,14 +4,14 @@ Python client SDK for SimuTrador.
 
 ### Status
 
-*   ✅ Implemented: WebSocket health check CLI and config via environment/.env
-*   ✅ Implemented: Authentication (JWT token exchange, CLI auth commands)
-*   ✅ Implemented: Session management (create, status, list, delete simulation sessions)
-*   Pending: Additional API commands, WebSocket simulation commands
+- ✅ Implemented: WebSocket health check CLI and config via environment/.env
+- ✅ Implemented: Authentication (JWT token exchange, CLI auth commands)
+- ✅ Implemented: Session management (create, status, list, delete simulation sessions)
+- Pending: Additional API commands, WebSocket simulation commands
 
 ### Installation
 
-*   uv sync
+- uv sync
 
 ### Configuration
 
@@ -25,30 +25,30 @@ cp .env.sample .env
 
 #### Server Configuration
 
-*   `SERVER__WEBSOCKET__URL=ws://127.0.0.1:8003` - Base WebSocket URL (used when --url is not provided)
+- `SERVER__WEBSOCKET__URL=ws://127.0.0.1:8003` - Base WebSocket URL (used when --url is not provided)
 
 #### Authentication Configuration
 
-*   `AUTH__API_KEY=sk_your_api_key_here` - Your SimuTrador API key (makes --api-key optional)
-*   `AUTH__SERVER_URL=http://127.0.0.1:8001` - Server URL for authentication (makes --server-url optional)
-*   `AUTH__TOKEN=` - JWT token (automatically managed, don't set manually)
+- `AUTH__API_KEY=sk_your_api_key_here` - Your SimuTrador API key (makes --api-key optional)
+- `AUTH__SERVER_URL=http://127.0.0.1:8001` - Server URL for authentication (makes --server-url optional)
+- `AUTH__TOKEN=` - JWT token (automatically managed, don't set manually)
 
 #### Session Configuration
 
-*   `SESSION__DEFAULT_INITIAL_CAPITAL=100000.00` - Default initial capital for new sessions
-*   `SESSION__DEFAULT_DATA_PROVIDER=polygon` - Default data provider for sessions
-*   `SESSION__DEFAULT_COMMISSION_PER_SHARE=0.005` - Default commission per share
-*   `SESSION__DEFAULT_SLIPPAGE_BPS=5` - Default slippage in basis points
-*   `SESSION__SESSION_TIMEOUT_SECONDS=30` - Timeout for session operations
-*   `SESSION__MAX_RETRY_ATTEMPTS=3` - Maximum retry attempts for session operations
+- `SESSION__DEFAULT_INITIAL_CAPITAL=100000.00` - Default initial capital for new sessions
+- `SESSION__DEFAULT_DATA_PROVIDER=polygon` - Default data provider for sessions
+- `SESSION__DEFAULT_COMMISSION_PER_SHARE=0.005` - Default commission per share
+- `SESSION__DEFAULT_SLIPPAGE_BPS=5` - Default slippage in basis points
+- `SESSION__SESSION_TIMEOUT_SECONDS=30` - Timeout for session operations
+- `SESSION__MAX_RETRY_ATTEMPTS=3` - Maximum retry attempts for session operations
 
 #### Advanced Configuration
 
-*   `ENV=/absolute/path/to/.env` - Point to a different env file path
+- `ENV=/absolute/path/to/.env` - Point to a different env file path
 
 #### Configuration Precedence
 
-*   CLI argument > environment/.env > built-in defaults
+- CLI argument > environment/.env > built-in defaults
 
 This means you can:
 
@@ -90,8 +90,8 @@ asyncio.run(main())
 
 Notes:
 
-*   Copy .env.sample to .env and set AUTH\_\_API\_KEY to avoid passing the key in code
-*   In the next iteration, a typed `SimulationClient.start_simulation(...)` will replace the raw dict payloads and return Pydantic models from simutrador-core
+- Copy .env.sample to .env and set AUTH\_\_API_KEY to avoid passing the key in code
+- In the next iteration, a typed `SimulationClient.start_simulation(...)` will replace the raw dict payloads and return Pydantic models from simutrador-core
 
 ### CLI Usage
 
@@ -99,20 +99,20 @@ Notes:
 
 **Configuration-driven usage** (recommended - set API key in .env):
 
-*   `uv run simutrador-client auth login` - Uses API key from AUTH\_\_API\_KEY
-*   `uv run simutrador-client auth status` - Check authentication status
-*   `uv run simutrador-client auth logout` - Clear cached token
+- `uv run simutrador-client auth login` - Uses API key from AUTH\_\_API_KEY
+- `uv run simutrador-client auth status` - Check authentication status
+- `uv run simutrador-client auth logout` - Clear cached token
 
 **Explicit argument usage** (overrides .env settings):
 
-*   `uv run simutrador-client auth login --api-key sk_your_api_key_here`
-*   `uv run simutrador-client auth login --api-key sk_key --server-url http://custom-server.com`
+- `uv run simutrador-client auth login --api-key sk_your_api_key_here`
+- `uv run simutrador-client auth login --api-key sk_key --server-url http://custom-server.com`
 
 #### Health Check Commands
 
-*   Health check via WebSocket:
-    *   `uv run simutrador-client health`
-    *   `uv run simutrador-client health --url ws://127.0.0.1:8003/ws/health`
+- Health check via WebSocket:
+  - `uv run simutrador-client health`
+  - `uv run simutrador-client health --url ws://127.0.0.1:8003/ws/health`
 
 #### Output Examples
 
@@ -221,8 +221,21 @@ $ uv run simutrador-client session create AAPL \
 
 ### Development
 
-*   Lint: uv run ruff check --fix src/
-*   Type check: uv run pyright src/
-*   Tests: uv run pytest -q
+- Lint: uv run ruff check --fix src/
+- Type check: uv run pyright src/
+- Tests: uv run pytest -q
 
 Python client SDK for SimuTrador.
+
+## Publish in TestPyPI / PyPI
+
+````
+# Bump patch version and publish
+./scripts/deployment/publish.sh --bump patch
+
+# Set specific version and auto-publish to PyPI
+./scripts/deployment/publish.sh --set-version 1.1.0 --publish-pypi
+
+# Skip TestPyPI for faster workflow
+./scripts/deployment/publish.sh --bump minor --skip-testpypi```
+````

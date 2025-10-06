@@ -1,6 +1,6 @@
 [project]
 name = "simutrador-client"
-version = "0.1.0"
+version = "0.1.4"
 description = "Official SimuTrador Python client SDK to connect to the simulation engine via WebSocket"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -55,7 +55,13 @@ typeCheckingMode = "basic"
 [[tool.uv.index]]
 name = "testpypi"
 url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
 explicit = true
 
 [tool.uv.sources]
 "simutrador-core" = { index = "testpypi" }
+
+# [tool.uv.workspace]
+# members = [
+#     "example",
+# ]
