@@ -55,13 +55,13 @@ except ImportError as e:
 
 # Flow modules (menu options)
 try:
+    from demo.flows.invalid_inputs import run as run_invalid_inputs_flow
     from demo.flows.normal import run as run_normal_flow
     from demo.flows.rate_limits import run as run_rate_limits_flow
-    from demo.flows.invalid_inputs import run as run_invalid_inputs_flow
 except ModuleNotFoundError:
+    from flows.invalid_inputs import run as run_invalid_inputs_flow
     from flows.normal import run as run_normal_flow
     from flows.rate_limits import run as run_rate_limits_flow
-    from flows.invalid_inputs import run as run_invalid_inputs_flow
 
 
 class SimuTraderDemo:
