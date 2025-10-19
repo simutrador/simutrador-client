@@ -15,5 +15,6 @@
   "executionEnvironments": [
     { "root": "src" },
     { "root": "tests", "reportPrivateUsage": "none" }
-  ]
+  ],
+  "reportMissingTypeStubs": "none"
 }

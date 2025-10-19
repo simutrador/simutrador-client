@@ -7,7 +7,7 @@ handling all HTTP communication with the data-manager service.
 
 from __future__ import annotations
 
-from typing import Optional
+from types import TracebackType
 
 import httpx
 import pandas as pd
@@ -29,7 +29,7 @@ class DataService:
     - Resource cleanup
     """
 
-    def __init__(self, base_url: Optional[str] = None, timeout: float = 30.0):
+    def __init__(self, base_url: str | None = None, timeout: float = 30.0):
         """
         Initialize the data service.
 
@@ -51,8 +51,8 @@ class DataService:
         self,
         symbol: str,
         timeframe: str = "1min",
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         page_size: int = 10000,
     ) -> pd.DataFrame:
         """
@@ -104,12 +104,12 @@ class DataService:
             df = pd.DataFrame(price_data)
 
             # Ensure proper data types
-            df["timestamp"] = pd.to_datetime(df["timestamp"])
-            df["open"] = pd.to_numeric(df["open"])
-            df["high"] = pd.to_numeric(df["high"])
-            df["low"] = pd.to_numeric(df["low"])
-            df["close"] = pd.to_numeric(df["close"])
-            df["volume"] = pd.to_numeric(df["volume"])
+            df["timestamp"] = pd.to_datetime(df["timestamp"])  # type: ignore[assignment]
+            df["open"] = pd.to_numeric(df["open"])  # type: ignore[assignment]
+            df["high"] = pd.to_numeric(df["high"])  # type: ignore[assignment]
+            df["low"] = pd.to_numeric(df["low"])  # type: ignore[assignment]
+            df["close"] = pd.to_numeric(df["close"])  # type: ignore[assignment]
+            df["volume"] = pd.to_numeric(df["volume"])  # type: ignore[assignment]
 
             # Sort by timestamp ascending
             df = df.sort_values("timestamp").reset_index(drop=True)
@@ -167,16 +167,21 @@ class DataService:
         """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Async context manager exit."""
         await self.close()
 
 
 # Global data service instance
-_data_service: Optional[DataService] = None
+_data_service: DataService | None = None
 
 
-def get_data_service(base_url: Optional[str] = None) -> DataService:
+def get_data_service(base_url: str | None = None) -> DataService:
     """
     Get the global data service instance.
 
@@ -196,7 +201,7 @@ def get_data_service(base_url: Optional[str] = None) -> DataService:
     return _data_service
 
 
-def set_data_service(service: Optional[DataService]) -> None:
+def set_data_service(service: DataService | None) -> None:
     """
     Set the global data service instance (for testing).
 

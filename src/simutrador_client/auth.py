@@ -7,7 +7,7 @@ Handles JWT token exchange with the server and token management.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -88,7 +88,7 @@ class AuthClient:
 
                 # Cache the token
                 self._cached_token = token_response.access_token
-                self._token_expires_at = datetime.now(timezone.utc).replace(
+                self._token_expires_at = datetime.now(UTC).replace(
                     microsecond=0
                 ) + timedelta(seconds=token_response.expires_in)
 
@@ -115,7 +115,7 @@ class AuthClient:
             return None
 
         # Check if token is expired (with 5 minute buffer)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         buffer_time = timedelta(minutes=5)
         if now >= (self._token_expires_at - buffer_time):
             self._cached_token = None
