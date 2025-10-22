@@ -4,6 +4,8 @@ import time
 
 import pytest
 
+from simutrador_client.settings import get_settings
+
 try:
     import httpx
 except Exception as e:  # pragma: no cover - dependency guard
@@ -20,7 +22,12 @@ def test_http_health_returns_429_with_headers_when_limited() -> None:
     - If the first request is already limited (previous tests consumed tokens),
       it still validates the headers on 429.
     """
-    url = "http://127.0.0.1:8003/health"
+    # Build health URL from client settings (convert ws:// to http://, wss:// to https://)
+    ws_base = get_settings().server.websocket.url.rstrip("/")
+    http_base = (
+        ws_base.replace("wss://", "https://").replace("ws://", "http://")
+    )
+    url = f"{http_base}/health"
 
     try:
         with httpx.Client(timeout=3.0) as client:

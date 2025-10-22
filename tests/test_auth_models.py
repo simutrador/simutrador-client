@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 from simutrador_core.models import (
-    TokenRequest,
     TokenResponse,
     UserLimitsResponse,
     UserPlan,
@@ -17,11 +16,8 @@ from simutrador_core.models import (
 class TestAuthenticationModels:
     """Test authentication-related Pydantic models."""
 
-    def test_token_request_empty_body(self):
-        """Test that TokenRequest accepts empty body (API key in header)."""
-        request = TokenRequest()
-        assert request is not None
-        # TokenRequest should have no required fields since API key is in header
+    # Note: TokenRequest behavior is covered by core; client does not rely on
+    # it directly, so we omit a client test here to keep scope focused.
 
     def test_token_response_creation(self):
         """Test TokenResponse model creation and validation."""
@@ -38,11 +34,8 @@ class TestAuthenticationModels:
         assert response.user_id == "user_12345"
         assert response.plan == UserPlan.PROFESSIONAL
 
-    def test_user_plan_enum_values(self):
-        """Test UserPlan enum values."""
-        assert UserPlan.FREE == "free"
-        assert UserPlan.PROFESSIONAL == "professional"
-        assert UserPlan.ENTERPRISE == "enterprise"
+    # Note: Enum literal values are asserted in core; client relies on serialization
+    # shape, which is covered by test_token_response_json_serialization.
 
     def test_user_limits_response_creation(self):
         """Test UserLimitsResponse model creation."""

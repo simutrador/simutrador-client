@@ -1,3 +1,3 @@
 """
-Tests for SimuTrador Server.
+Tests for SimuTrador Client.
 """

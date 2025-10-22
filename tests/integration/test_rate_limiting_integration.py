@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from collections.abc import Awaitable
+from typing import Any, Protocol
 
 import pytest
 
@@ -21,6 +22,11 @@ except Exception as e:  # pragma: no cover - dependency guard
 
 
 RATE_LIMIT_MARKER = "RATE_LIMITED"
+
+
+class ClientWS(Protocol):
+    def recv(self) -> Awaitable[str | bytes]: ...
+    def send(self, message: str) -> Awaitable[None]: ...
 
 
 def _build_ws_url() -> str:
@@ -49,7 +55,7 @@ async def _ensure_authenticated() -> tuple[str, str]:
 
 
 async def _recv_relevant(
-    ws: Any, timeout: float = 5.0
+    ws: ClientWS, timeout: float = 5.0
 ) -> dict[str, Any] | None:
     """Receive next non-handshake message or None on timeout."""
     try:
