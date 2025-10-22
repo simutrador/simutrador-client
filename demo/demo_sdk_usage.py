@@ -28,8 +28,8 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, cast
+from datetime import UTC, datetime
+from typing import Any, cast
 
 import websockets
 
@@ -72,7 +72,7 @@ class SimuTraderDemo:
     client SDK, from authentication to session management.
     """
 
-    def __init__(self, server_url: Optional[str] = None, interactive: bool = True):
+    def __init__(self, server_url: str | None = None, interactive: bool = True):
         """
         Initialize the demo with optional server URL override.
 
@@ -85,8 +85,8 @@ class SimuTraderDemo:
             server_url
         )  # retained for compatibility
         self.settings = get_settings()
-        self.created_sessions: List[str] = []
-        self._last_ws_session_id: Optional[str] = None
+        self.created_sessions: list[str] = []
+        self._last_ws_session_id: str | None = None
 
         self.interactive = interactive
 
@@ -234,12 +234,12 @@ class SimuTraderDemo:
                 return False
             print("Please answer 'y' or 'n'.")
 
-    def _log_connection_ready(self, msg: Dict[str, Any]) -> None:
+    def _log_connection_ready(self, msg: dict[str, Any]) -> None:
         """Log server handshake information and any advertised limits."""
         try:
-            meta: Dict[str, Any] = cast(Dict[str, Any], msg.get("meta") or {})
-            limits: Dict[str, Any] = cast(
-                Dict[str, Any], meta.get("limits") or msg.get("limits") or {}
+            meta: dict[str, Any] = cast(dict[str, Any], msg.get("meta") or {})
+            limits: dict[str, Any] = cast(
+                dict[str, Any], meta.get("limits") or msg.get("limits") or {}
             )
             logger.info("🔗 Connection ready: handshake received")
             plan = meta.get("plan") or meta.get("plan_name")
@@ -265,11 +265,11 @@ class SimuTraderDemo:
             # Never fail the demo due to logging issues
             pass
 
-    def _log_ws_error_context(self, msg: Dict[str, Any]) -> None:
+    def _log_ws_error_context(self, msg: dict[str, Any]) -> None:
         """Log useful error context such as code and retry-after hints."""
         try:
-            meta: Dict[str, Any] = cast(Dict[str, Any], msg.get("meta") or {})
-            data: Dict[str, Any] = cast(Dict[str, Any], msg.get("data") or {})
+            meta: dict[str, Any] = cast(dict[str, Any], msg.get("meta") or {})
+            data: dict[str, Any] = cast(dict[str, Any], msg.get("data") or {})
             code = str(meta.get("code") or msg.get("code") or data.get("code") or "")
             message = str(
                 msg.get("message") or data.get("detail") or data.get("message") or ""
@@ -312,10 +312,10 @@ class SimuTraderDemo:
                     "data": {
                         "symbols": ["AAPL"],
                         "start_date": datetime(
-                            2023, 1, 1, tzinfo=timezone.utc
+                            2023, 1, 1, tzinfo=UTC
                         ).isoformat(),
                         "end_date": datetime(
-                            2023, 12, 31, tzinfo=timezone.utc
+                            2023, 12, 31, tzinfo=UTC
                         ).isoformat(),
                         "initial_capital": 100000.0,
                         "metadata": {
@@ -331,7 +331,7 @@ class SimuTraderDemo:
 
                 # Wait for session_created response, skipping initial connection events
                 expected_request_id = payload["request_id"]
-                session_msg: Optional[Dict[str, Any]] = None
+                session_msg: dict[str, Any] | None = None
                 for _ in range(10):  # allow a few out-of-band messages
                     raw = await asyncio.wait_for(ws.recv(), timeout=10)
                     msg = json.loads(raw)
@@ -371,10 +371,10 @@ class SimuTraderDemo:
                 logger.info("✅ Session created successfully!")
                 logger.info("🆔 Session ID: %s", session_id)
 
-                meta: Dict[str, Any] = cast(
-                    Dict[str, Any], session_msg.get("meta") or {}
+                meta: dict[str, Any] = cast(
+                    dict[str, Any], session_msg.get("meta") or {}
                 )
-                warnings_list: List[Any] = cast(List[Any], meta.get("warnings") or [])
+                warnings_list: list[Any] = cast(list[Any], meta.get("warnings") or [])
                 if warnings_list:
                     logger.info("⚠️  Validation warnings: %s", warnings_list)
 
@@ -382,7 +382,7 @@ class SimuTraderDemo:
                 try:
                     raw2 = await asyncio.wait_for(ws.recv(), timeout=2)
                     logger.info("ℹ️  Additional message: %s", raw2)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.info("⏳ No additional messages yet (as expected for demo)")
 
                 # Connection context manager will close WS, triggering server cleanup
@@ -406,7 +406,7 @@ class SimuTraderDemo:
         logger.info("🧪 Testing error scenarios to showcase robust error handling...")
 
         # Use one-off WS connections for validation tests
-        async def send_and_log(payload: Dict[str, Any], label: str) -> None:
+        async def send_and_log(payload: dict[str, Any], label: str) -> None:
             try:
                 ws_url = self._build_ws_url()
                 async with websockets.connect(ws_url, ping_interval=None) as ws:
@@ -435,8 +435,8 @@ class SimuTraderDemo:
                 "request_id": "demo-invalid-symbols",
                 "data": {
                     "symbols": ["INVALID_SYMBOL", "ANOTHER_BAD_SYMBOL"],
-                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc).isoformat(),
-                    "end_date": datetime(2023, 12, 31, tzinfo=timezone.utc).isoformat(),
+                    "start_date": datetime(2023, 1, 1, tzinfo=UTC).isoformat(),
+                    "end_date": datetime(2023, 12, 31, tzinfo=UTC).isoformat(),
                     "initial_capital": 10000.0,
                 },
             },
@@ -452,9 +452,9 @@ class SimuTraderDemo:
                 "data": {
                     "symbols": ["AAPL"],
                     "start_date": datetime(
-                        2023, 12, 31, tzinfo=timezone.utc
+                        2023, 12, 31, tzinfo=UTC
                     ).isoformat(),
-                    "end_date": datetime(2023, 1, 1, tzinfo=timezone.utc).isoformat(),
+                    "end_date": datetime(2023, 1, 1, tzinfo=UTC).isoformat(),
                     "initial_capital": 10000.0,
                 },
             },
@@ -469,8 +469,8 @@ class SimuTraderDemo:
                 "request_id": "demo-invalid-capital",
                 "data": {
                     "symbols": ["AAPL"],
-                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc).isoformat(),
-                    "end_date": datetime(2023, 12, 31, tzinfo=timezone.utc).isoformat(),
+                    "start_date": datetime(2023, 1, 1, tzinfo=UTC).isoformat(),
+                    "end_date": datetime(2023, 12, 31, tzinfo=UTC).isoformat(),
                     "initial_capital": -1000.0,
                 },
             },
@@ -530,8 +530,8 @@ class SimuTraderDemo:
                 "request_id": req_id,
                 "data": {
                     "symbols": ["AAPL"],
-                    "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc).isoformat(),
-                    "end_date": datetime(2023, 12, 31, tzinfo=timezone.utc).isoformat(),
+                    "start_date": datetime(2023, 1, 1, tzinfo=UTC).isoformat(),
+                    "end_date": datetime(2023, 12, 31, tzinfo=UTC).isoformat(),
                     "initial_capital": 10000.0,
                     "metadata": {"source": "stress_test", "idx": idx},
                 },
@@ -549,11 +549,11 @@ class SimuTraderDemo:
                         # If the server responds with errors
                         if msg_type in {"error", "validation_error"}:
                             # Try to detect rate limiting from payload fields/code/message
-                            meta: Dict[str, Any] = cast(
-                                Dict[str, Any], msg.get("meta") or {}
+                            meta: dict[str, Any] = cast(
+                                dict[str, Any], msg.get("meta") or {}
                             )
-                            data: Dict[str, Any] = cast(
-                                Dict[str, Any], msg.get("data") or {}
+                            data: dict[str, Any] = cast(
+                                dict[str, Any], msg.get("data") or {}
                             )
                             code: str = str(
                                 meta.get("code")
@@ -642,7 +642,7 @@ class SimuTraderDemo:
         logger.info("-" * 40)
 
         ws_url = self._build_ws_url()
-        RATE_LIMIT_MARKER = "RATE_LIMITED"
+        rate_limit_marker = "RATE_LIMITED"
         observed_rate_limited = False
 
         try:
@@ -654,7 +654,7 @@ class SimuTraderDemo:
                         _ = json.loads(raw0)
                     except Exception:
                         pass
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
 
                 for i in range(count):
@@ -664,10 +664,10 @@ class SimuTraderDemo:
                         "data": {
                             "symbols": ["AAPL"],
                             "start_date": datetime(
-                                2023, 1, 1, tzinfo=timezone.utc
+                                2023, 1, 1, tzinfo=UTC
                             ).isoformat(),
                             "end_date": datetime(
-                                2023, 1, 31, tzinfo=timezone.utc
+                                2023, 1, 31, tzinfo=UTC
                             ).isoformat(),
                             "initial_capital": 10000.0,
                         },
@@ -678,7 +678,7 @@ class SimuTraderDemo:
                         raw = await asyncio.wait_for(ws.recv(), timeout=1.5)
                         msg = json.loads(raw)
                         if isinstance(msg, dict):
-                            m: Dict[str, Any] = cast(Dict[str, Any], msg)
+                            m: dict[str, Any] = cast(dict[str, Any], msg)
                             if m.get("type") == "error":
                                 blob = json.dumps(
                                     {
@@ -688,17 +688,17 @@ class SimuTraderDemo:
                                     }
                                 ).upper()
                                 if (
-                                    RATE_LIMIT_MARKER in blob
+                                    rate_limit_marker in blob
                                     or str(m.get("code", "")).upper()
-                                    == RATE_LIMIT_MARKER
+                                    == rate_limit_marker
                                 ):
                                     observed_rate_limited = True
                                     # Try to surface retry-after hints if provided
-                                    meta2: Dict[str, Any] = cast(
-                                        Dict[str, Any], m.get("meta") or {}
+                                    meta2: dict[str, Any] = cast(
+                                        dict[str, Any], m.get("meta") or {}
                                     )
-                                    data2: Dict[str, Any] = cast(
-                                        Dict[str, Any], m.get("data") or {}
+                                    data2: dict[str, Any] = cast(
+                                        dict[str, Any], m.get("data") or {}
                                     )
                                     retry_after = (
                                         meta2.get("retry_after")
@@ -713,30 +713,30 @@ class SimuTraderDemo:
                                             ra = float(retry_after)
                                             ra_sec = ra / 1000.0 if ra > 1000 else ra
                                             logger.info(
-                                                "✅ RATE_LIMITED (retry after ~%.2fs) on message %d",
+                                                "✅ RATE_LIMITED: retry ~%.2fs (msg %d)",
                                                 ra_sec,
                                                 i,
                                             )
                                         except Exception:
                                             logger.info(
-                                                "✅ RATE_LIMITED (retry after %s) on message %d",
+                                                "✅ RATE_LIMITED: retry %s (msg %d)",
                                                 retry_after,
                                                 i,
                                             )
                                     else:
                                         logger.info(
-                                            "✅ Observed RATE_LIMITED error on message %d",
+                                            "✅ Observed RATE_LIMITED on msg %d",
                                             i,
                                         )
                                     break
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         pass
 
                     if interval_ms > 0:
                         await asyncio.sleep(interval_ms / 1000.0)
         except Exception as e:
             reason = str(e)
-            if RATE_LIMIT_MARKER in reason:
+            if rate_limit_marker in reason:
                 observed_rate_limited = True
                 logger.info(
                     "✅ Observed RATE_LIMITED via connection close/handshake: %s",

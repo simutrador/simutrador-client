@@ -19,7 +19,6 @@ This demo covers:
 
 import logging
 import sys
-from typing import Optional
 
 # Configure logging
 logging.basicConfig(
@@ -44,7 +43,7 @@ class StrategyDeveloperExample:
     using the SimuTrador SDK.
     """
 
-    def __init__(self, strategy_name: str, server_url: Optional[str] = None):
+    def __init__(self, strategy_name: str, server_url: str | None = None):
         """Initialize strategy with SDK clients."""
         self.strategy_name = strategy_name
         self.server_url = server_url
@@ -55,7 +54,7 @@ class StrategyDeveloperExample:
         self.session_client = get_session_client(server_url)
 
         # Strategy state
-        self.session_id: Optional[str] = None
+        self.session_id: str | None = None
         self.is_running = False
 
         logger.info("🎯 Strategy '%s' initialized", strategy_name)

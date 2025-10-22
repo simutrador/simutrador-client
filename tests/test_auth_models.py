@@ -2,7 +2,7 @@
 Tests for authentication models in simutrador_core.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -46,7 +46,7 @@ class TestAuthenticationModels:
 
     def test_user_limits_response_creation(self):
         """Test UserLimitsResponse model creation."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         response = UserLimitsResponse(
             plan=UserPlan.FREE,

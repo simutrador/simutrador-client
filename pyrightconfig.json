@@ -1,7 +1,7 @@
 {
   "venvPath": ".",
   "venv": ".venv",
-  "include": ["src"],
+  "include": ["src", "tests"],
   "exclude": [
     "**/__pycache__",
     "**/.venv",
@@ -14,7 +14,7 @@
   "typeCheckingMode": "strict",
   "executionEnvironments": [
     { "root": "src" },
-    { "root": "tests", "reportPrivateUsage": "none" }
+    { "root": "tests", "extraPaths": ["src"], "reportPrivateUsage": "none" }
   ],
   "reportMissingTypeStubs": "none"
 }

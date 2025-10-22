@@ -199,6 +199,7 @@ class AuthClient:
 
 # Global auth client instance
 _auth_client: AuthClient | None = None
+_auth_client_is_custom: bool = False
 
 
 def get_auth_client(server_url: str | None = None) -> AuthClient:
@@ -211,15 +212,20 @@ def get_auth_client(server_url: str | None = None) -> AuthClient:
     Returns:
         AuthClient instance
     """
-    global _auth_client
+    global _auth_client, _auth_client_is_custom
 
-    if _auth_client is None or (
-        server_url and _auth_client.server_url != server_url.rstrip("/")
-    ):
-        from .settings import get_settings
+    # If a custom client was set explicitly and no override is requested, respect it
+    if _auth_client is not None and _auth_client_is_custom and server_url is None:
+        return _auth_client
 
-        url = server_url or get_settings().auth.server_url
-        _auth_client = AuthClient(url)
+    # Compute the desired URL from explicit argument or settings
+    from .settings import get_settings
+    desired_url = (server_url or get_settings().auth.server_url).rstrip("/")
+
+    # Initialize or refresh the global client if it doesn't match the desired URL
+    if _auth_client is None or _auth_client.server_url != desired_url:
+        _auth_client = AuthClient(desired_url)
+        _auth_client_is_custom = False
 
     return _auth_client
 
@@ -231,5 +237,6 @@ def set_auth_client(client: AuthClient) -> None:
     Args:
         client: AuthClient instance to use globally
     """
-    global _auth_client
+    global _auth_client, _auth_client_is_custom
     _auth_client = client
+    _auth_client_is_custom = True

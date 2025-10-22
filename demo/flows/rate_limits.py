@@ -1,8 +1,8 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional, cast
+from datetime import UTC, datetime
+from typing import Any, cast
 
 import websockets
 
@@ -40,19 +40,19 @@ async def _ask_int(prompt: str, default: int) -> int:
         return default
 
 
-async def _fetch_limits_via_handshake(demo: Any) -> Dict[str, Any]:
+async def _fetch_limits_via_handshake(demo: Any) -> dict[str, Any]:
     """Open a transient WS to read connection_ready and return plan/limits, if any."""
-    info: Dict[str, Any] = {}
+    info: dict[str, Any] = {}
     try:
         ws_url = demo._build_ws_url()
         async with websockets.connect(ws_url, ping_interval=None) as ws:
             for _ in range(5):
                 raw: str | bytes = await asyncio.wait_for(ws.recv(), timeout=5)
-                msg: Dict[str, Any] = json.loads(raw)
+                msg: dict[str, Any] = json.loads(raw)
                 if msg.get("type") == "connection_ready":
-                    meta = cast(Dict[str, Any], msg.get("meta") or {})
+                    meta = cast(dict[str, Any], msg.get("meta") or {})
                     limits = cast(
-                        Dict[str, Any], meta.get("limits") or msg.get("limits") or {}
+                        dict[str, Any], meta.get("limits") or msg.get("limits") or {}
                     )
                     plan = meta.get("plan") or meta.get("plan_name")
                     info["plan"] = plan
@@ -70,17 +70,17 @@ async def _fetch_limits_via_handshake(demo: Any) -> Dict[str, Any]:
     return info
 
 
-async def _recv_until_session_created(ws: Any) -> Optional[str]:
+async def _recv_until_session_created(ws: Any) -> str | None:
     try:
         for _ in range(10):
             raw: str | bytes = await asyncio.wait_for(ws.recv(), timeout=10)
-            msg: Dict[str, Any] = json.loads(raw)
+            msg: dict[str, Any] = json.loads(raw)
             mtype = msg.get("type")
             if mtype in {"connection_ready", "ping", "heartbeat"}:
                 continue
             if mtype == "session_created":
-                data = cast(Dict[str, Any], msg.get("data") or {})
-                return cast(Optional[str], data.get("session_id"))
+                data = cast(dict[str, Any], msg.get("data") or {})
+                return cast(str | None, data.get("session_id"))
             if mtype in {"error", "validation_error", "session_error"}:
                 logger.error("Session error during hold setup: %s", msg)
                 return None
@@ -90,7 +90,7 @@ async def _recv_until_session_created(ws: Any) -> Optional[str]:
         return None
 
 
-async def _open_and_hold_one(ws_url: str, idx: int) -> Optional[_HeldWS]:
+async def _open_and_hold_one(ws_url: str, idx: int) -> _HeldWS | None:
     try:
         ws: Any = await websockets.connect(ws_url, ping_interval=None)
     except Exception as e:
@@ -102,8 +102,8 @@ async def _open_and_hold_one(ws_url: str, idx: int) -> Optional[_HeldWS]:
         "request_id": f"cap-hold-{idx}",
         "data": {
             "symbols": ["AAPL"],
-            "start_date": datetime(2023, 1, 1, tzinfo=timezone.utc).isoformat(),
-            "end_date": datetime(2023, 12, 31, tzinfo=timezone.utc).isoformat(),
+            "start_date": datetime(2023, 1, 1, tzinfo=UTC).isoformat(),
+            "end_date": datetime(2023, 12, 31, tzinfo=UTC).isoformat(),
             "initial_capital": 10000.0,
             "metadata": {"source": "cap_hold", "idx": idx},
         },
@@ -175,7 +175,7 @@ async def demo_connection_cap_hold(demo: Any, hold_sec: int = 10) -> None:
             )
         else:
             logger.info(
-                "ℹ️  Handshake denied without explicit 429 marker; enable DEBUG to inspect raw handshake."
+                "ℹ️  Handshake denied without 429 marker; enable DEBUG for details."
             )
 
     # Keep the two sessions open briefly so it's visible in server metrics/logs
@@ -201,7 +201,7 @@ async def run(demo: Any) -> bool:
     limits_info = await _fetch_limits_via_handshake(demo)
     plan = limits_info.get("plan")
     val = limits_info.get("limits")
-    limits: Dict[str, Any] = cast(Dict[str, Any], val if isinstance(val, dict) else {})
+    limits: dict[str, Any] = cast(dict[str, Any], val if isinstance(val, dict) else {})
     if plan or limits:
         logger.info("\n")
         logger.info("🧭 Current server plan/limits (from handshake):")
@@ -278,7 +278,7 @@ async def run(demo: Any) -> bool:
             "How long to hold the sessions open (seconds)?", hold_sec
         )
         proceed = await demo._confirm(
-            f"Proceed with connection-cap demo: hold for {hold_sec}s and attempt an extra connection?"
+            f"Proceed with cap demo: hold {hold_sec}s, then attempt one more connection?"
         )
         if proceed:
             await demo_connection_cap_hold(demo, hold_sec)

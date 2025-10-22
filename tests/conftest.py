@@ -4,17 +4,16 @@ Test configuration for SimuTrador client tests.
 Sets up test environment and fixtures.
 """
 
-import os
 import asyncio
-import contextlib
 import faulthandler
+import os
 import sys
 import threading
 
 import pytest
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session", autouse=True)  
 def setup_test_environment():
     """Set up test environment configuration."""
     # Ensure JWT secret is available for tests that use JWTService
@@ -22,7 +21,7 @@ def setup_test_environment():
     yield
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(autouse=True)  
 def ensure_test_mode():
     """Ensure test mode is properly configured."""
     # Ensure JWT secret remains set for any tests that modify env
@@ -43,7 +42,7 @@ def loop():
 
 
 # Always-on watchdog: dump stacks if a test phase stalls > 5s
-@pytest.fixture(autouse=True)
+@pytest.fixture(autouse=True)  
 def watchdog():
     t = threading.Timer(5.0, lambda: faulthandler.dump_traceback(file=sys.stderr))
     t.daemon = True
@@ -55,11 +54,11 @@ def watchdog():
 
 
 # Leak detector: report threads and asyncio tasks that appear during a test
-@pytest.fixture(autouse=True)
+@pytest.fixture(autouse=True)  
 def leak_detector():
     start_threads = {t.ident for t in threading.enumerate()}
     # Try to snapshot tasks if an event loop is available and running
-    tasks_start = set()
+    tasks_start: set[int] = set()
     try:
         loop = asyncio.get_running_loop()
         tasks_start = {id(t) for t in asyncio.all_tasks(loop) if not t.done()}
@@ -92,31 +91,18 @@ def leak_detector():
 
 
 # Client-side cleanup - no server-side dependencies needed
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session", autouse=True)  
 def ensure_client_cleanup():
     """Clean up any client-side resources after test session."""
     yield
     # Client-specific cleanup can be added here if needed
 
 
-# Session-level: ensure background services/executors are shut down (prevents hang at exit)
-@pytest.fixture(scope="session", autouse=True)
-def ensure_services_shutdown():
-    yield
-    try:
-        # Prefer using the existing instance if created; avoid creating one just to shut it down
-        from simutrador_server.services import session_manager as sm_mod
 
-        sm = getattr(sm_mod, "_session_manager", None)
-        if sm is not None:
-            with contextlib.suppress(Exception):
-                sm.shutdown(wait=False)
-    except Exception:
-        pass
 
 
 # Session-end stall watchdog: if pytest stalls during global teardown, dump stacks after 20s
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session", autouse=True)  
 def session_stall_watchdog():
     try:
         yield

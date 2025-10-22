@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import pytest
+
 from simutrador_client.auth import AuthenticationError, get_auth_client
 from simutrador_client.settings import get_settings
 
@@ -28,7 +29,7 @@ def _build_ws_url() -> str:
     return get_auth_client().get_websocket_url(f"{base}/ws/simulate")
 
 
-async def _ensure_authenticated() -> Tuple[str, str]:
+async def _ensure_authenticated() -> tuple[str, str]:
     """Login (if needed) and return (user_id, plan).
 
     Skips the test module if authentication fails (e.g., server not running).
@@ -48,8 +49,8 @@ async def _ensure_authenticated() -> Tuple[str, str]:
 
 
 async def _recv_relevant(
-    ws: websockets.WebSocketClientProtocol, timeout: float = 5.0
-) -> Dict[str, Any] | None:
+    ws: Any, timeout: float = 5.0
+) -> dict[str, Any] | None:
     """Receive next non-handshake message or None on timeout."""
     try:
         raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
@@ -59,7 +60,7 @@ async def _recv_relevant(
             raw2 = await asyncio.wait_for(ws.recv(), timeout=timeout)
             return json.loads(raw2)
         return msg
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return None
 
 
@@ -70,15 +71,15 @@ async def test_connection_limit_rate_limiting_observed():
     This test is tolerant: it passes if at least one connection is limited when
     attempting significantly more connections than typical per-tier caps.
     """
-    _user_id, plan = await _ensure_authenticated()
+    _user_id, plan = await _ensure_authenticated()  # noqa: F841
     ws_url = _build_ws_url()
 
     # Choose a burst size that should exceed most tier caps
     attempts = 8
 
-    results: List[str] = []
+    results: list[str] = []
 
-    async def try_connect(i: int) -> str:
+    async def try_connect(_i: int) -> str:  # noqa: ARG
         try:
             async with websockets.connect(ws_url, ping_interval=None) as ws:
                 # If we get a relevant message, consider connected
@@ -105,11 +106,13 @@ async def test_connection_limit_rate_limiting_observed():
     tasks = [asyncio.create_task(try_connect(i)) for i in range(attempts)]
     results = await asyncio.gather(*tasks)
 
-    # Basic assertion: at least one connection was rate limited, or the environment is too permissive
-    # We consider the test "observed" if any were rate_limited; otherwise provide diagnostics.
+    # Basic assertion: at least one connection was rate limited, or the environment
+    # is too permissive. Consider the test "observed" if any were rate_limited;
+    # otherwise provide diagnostics.
     if "rate_limited" not in results:
         pytest.skip(
-            f"no RATE_LIMITED connection observed (plan={plan}, attempts={attempts}, results={results})"
+            f"no RATE_LIMITED observed (plan={plan}, attempts={attempts}, "
+            f"results={results})"
         )
 
 
@@ -119,7 +122,7 @@ async def test_message_burst_rate_limiting_observed():
     await _ensure_authenticated()
     ws_url = _build_ws_url()
 
-    payload_template: Dict[str, Any] = {
+    payload_template: dict[str, Any] = {
         "type": "start_simulation",
         "request_id": "msg-burst-0",
         "data": {
@@ -156,7 +159,7 @@ async def test_message_burst_rate_limiting_observed():
                     ):
                         observed_rate_limited = True
                         break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
     except InvalidStatus as e:
         # Handshake rejected; some deployments reject on token/plan with 403

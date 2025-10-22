@@ -1,6 +1,6 @@
 [project]
 name = "simutrador-client"
-version = "0.1.5"
+version = "0.1.6"
 description = "Official SimuTrador Python client SDK to connect to the simulation engine via WebSocket"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -9,11 +9,9 @@ dependencies = [
   "pydantic-settings>=2.10.0",
   "httpx>=0.28.0",
   "websockets>=12.0",
-  "simutrador-core>=1.0.10",
+  "simutrador-core",
 ]
 
-[project.scripts]
-simutrador-client = "simutrador_client.cli:main"
 
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
@@ -45,7 +43,12 @@ select = ["E", "F", "I", "N", "ARG", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = ["-v", "--tb=short"]
+asyncio_mode = "strict"
+addopts = ["-v", "--tb=short", "--strict-markers", "--strict-config"]
+filterwarnings = ["error"]
+markers = [
+  "integration: marks tests as integration (may require server or external deps)",
+]
 
 [tool.pyright]
 include = ["src", "tests"]
@@ -53,6 +56,8 @@ exclude = ["**/__pycache__", ".venv", "build", "dist"]
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "basic"
+
+executionEnvironments = [{ root = ".", extraPaths = ["./src"] }]
 
 
 [[tool.uv.index]]

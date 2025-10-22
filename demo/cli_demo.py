@@ -9,18 +9,15 @@ import websockets
 from simutrador_core.models.websocket import HealthStatus, WSMessage
 from simutrador_core.utils import get_default_logger
 
-from .auth import AuthenticationError, get_auth_client
+from simutrador_client.auth import AuthenticationError, get_auth_client
 
-# TODO: Add simulation client import here
-# from .simulation import SimulationError, get_simulation_client
-
-# Set up module-specific logger
-logger = get_default_logger("simutrador_client.cli")
+# Logger for demo CLI
+logger = get_default_logger("simutrador_client.cli_demo")
 
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="simutrador-client", description="SimuTrador Client CLI"
+        prog="simutrador-client-demo", description="SimuTrador Client CLI (demo/testing)"
     )
     sub = p.add_subparsers(dest="command", required=True)
 
@@ -55,10 +52,6 @@ def _build_parser() -> argparse.ArgumentParser:
     # auth logout
     auth_sub.add_parser("logout", help="Logout and clear cached token")
 
-    # TODO: Add simulation commands here
-    # simulate = sub.add_parser("simulate", help="Simulation commands")
-    # simulate_sub = simulate.add_subparsers(dest="simulate_command", required=True)
-
     return p
 
 
@@ -87,7 +80,7 @@ async def _run_auth_login(
     try:
         # Get API key from CLI arg or settings
         if not api_key:
-            from .settings import get_settings
+            from simutrador_client.settings import get_settings
 
             settings = get_settings()
             api_key = settings.auth.api_key
@@ -143,7 +136,7 @@ def _run_auth_status() -> int:
             logger.warning("User appears authenticated but token info unavailable")
     else:
         print("❌ Not authenticated")
-        print("Use 'simutrador-client auth login --api-key YOUR_KEY' to authenticate")
+        print("Use 'python demo/cli_demo.py auth login --api-key YOUR_KEY' to authenticate")
         logger.info("User is not authenticated")
         return 1
 
@@ -160,11 +153,7 @@ def _run_auth_logout() -> int:
     return 0
 
 
-# TODO: Add simulation command handlers here
-# async def _run_simulate_start(...) -> int:
-#     """Run simulation start command."""
-#     pass
-
+# Entry point for the demo CLI
 
 def main(argv: list[str] | None = None) -> int:
     from simutrador_client.settings import get_settings
@@ -188,13 +177,10 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"unknown auth command: {args.auth_command}")
             return 2
 
-    # TODO: Add simulation command handling here
-    # elif args.command == "simulate":
-    #     if args.simulate_command == "start":
-    #         return asyncio.run(_run_simulate_start(...))
-    #     else:
-    #         parser.error(f"unknown simulate command: {args.simulate_command}")
-    #         return 2
-
     parser.error("unknown command")
     return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

@@ -2,7 +2,7 @@
 Unit tests for authentication client.
 """
 
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
@@ -108,7 +108,7 @@ class TestAuthClient:
         """Test getting valid cached token."""
         # Manually set cached token
         self.auth_client._cached_token = "test_token"
-        self.auth_client._token_expires_at = datetime.now(timezone.utc) + timedelta(
+        self.auth_client._token_expires_at = datetime.now(UTC) + timedelta(
             hours=1
         )
 
@@ -118,7 +118,7 @@ class TestAuthClient:
         """Test getting expired cached token."""
         # Set expired token
         self.auth_client._cached_token = "expired_token"
-        self.auth_client._token_expires_at = datetime.now(timezone.utc) - timedelta(
+        self.auth_client._token_expires_at = datetime.now(UTC) - timedelta(
             hours=1
         )
 
@@ -128,7 +128,7 @@ class TestAuthClient:
     def test_is_authenticated_true(self):
         """Test is_authenticated when token is valid."""
         self.auth_client._cached_token = "test_token"
-        self.auth_client._token_expires_at = datetime.now(timezone.utc) + timedelta(
+        self.auth_client._token_expires_at = datetime.now(UTC) + timedelta(
             hours=1
         )
 
@@ -141,7 +141,7 @@ class TestAuthClient:
     def test_get_token_info_authenticated(self):
         """Test getting token info when authenticated."""
         token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.test_payload.signature"
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        expires_at = datetime.now(UTC) + timedelta(hours=1)
 
         self.auth_client._cached_token = token
         self.auth_client._token_expires_at = expires_at
@@ -161,7 +161,7 @@ class TestAuthClient:
         """Test logout functionality."""
         # Set up authenticated state
         self.auth_client._cached_token = "test_token"
-        self.auth_client._token_expires_at = datetime.now(timezone.utc) + timedelta(
+        self.auth_client._token_expires_at = datetime.now(UTC) + timedelta(
             hours=1
         )
 
@@ -177,7 +177,7 @@ class TestAuthClient:
         """Test token refresh."""
         # Set up initial token
         self.auth_client._cached_token = "old_token"
-        self.auth_client._token_expires_at = datetime.now(timezone.utc) + timedelta(
+        self.auth_client._token_expires_at = datetime.now(UTC) + timedelta(
             hours=1
         )
 
@@ -205,7 +205,7 @@ class TestAuthClient:
     def test_get_websocket_url_authenticated(self):
         """Test getting WebSocket URL when authenticated."""
         self.auth_client._cached_token = "test_token"
-        self.auth_client._token_expires_at = datetime.now(timezone.utc) + timedelta(
+        self.auth_client._token_expires_at = datetime.now(UTC) + timedelta(
             hours=1
         )
 
@@ -217,7 +217,7 @@ class TestAuthClient:
     def test_get_websocket_url_with_existing_params(self):
         """Test getting WebSocket URL with existing query parameters."""
         self.auth_client._cached_token = "test_token"
-        self.auth_client._token_expires_at = datetime.now(timezone.utc) + timedelta(
+        self.auth_client._token_expires_at = datetime.now(UTC) + timedelta(
             hours=1
         )
 

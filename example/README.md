@@ -181,8 +181,135 @@ uv add --index-url https://test.pypi.org/simple/ simutrador-client simutrador-co
 2. **"Connection refused"**: Make sure the SimuTrador server is running
 3. **Import errors**: Verify Python 3.11+ and that the SDK installed correctly
 
+## Project Architecture
+
+This project follows a **decoupled architecture** where data fetching and live trading execution are completely independent:
+
+### File Structure
+
+```
+example/
+├── run_all.py              # 🎯 Main orchestrator (runs complete pipeline)
+├── backtest_strategy.py    # 📊 Strategy backtesting with historical data
+├── main.py                 # 🚀 Live trading execution
+├── strategy.py             # 📈 Shared trading strategy logic
+├── pyproject.toml          # Project configuration
+└── .env                    # Environment variables (API key, server URL)
+```
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    run_all.py (Orchestrator)                │
+│                                                             │
+│  ┌──────────────────────┐      ┌──────────────────────┐   │
+│  │ Phase 1: Backtesting │      │ Phase 2: Live Trading│   │
+│  │                      │      │                      │   │
+│  │ backtest_strategy.py │      │ main.py              │   │
+│  │ ↓                    │      │ ↓                    │   │
+│  │ DataService          │      │ WebSocket Server     │   │
+│  │ (Historical Data)    │      │ (Live Data)          │   │
+│  └──────────────────────┘      └──────────────────────┘   │
+│           ↓                              ↓                 │
+│  ┌─────────────────────────────────────────────────────┐  │
+│  │         strategy.py (Shared Logic)                  │  │
+│  │  • TradingStrategy class                            │  │
+│  │  • Signal generation                               │  │
+│  │  • Position management                             │  │
+│  └─────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Components
+
+#### 1. **backtest_strategy.py** - Strategy Development & Backtesting
+
+- **Purpose**: Develop and test trading strategies using historical data
+- **Data Source**: Connects to DataService for historical OHLCV data
+- **Independence**: Completely independent of simulator connection
+- **Use Case**: Strategy development, parameter optimization, performance analysis
+- **Run**: `python backtest_strategy.py`
+
+#### 2. **main.py** - Live Trading Execution
+
+- **Purpose**: Execute the trading strategy with live market data
+- **Data Source**: Receives live data from simutrador-server via WebSocket
+- **Independence**: No dependency on historical data fetching
+- **Use Case**: Live trading simulation, real-time strategy execution
+- **Run**: `python main.py`
+
+#### 3. **strategy.py** - Shared Strategy Logic
+
+- **Purpose**: Contains the core trading strategy implementation
+- **Components**:
+  - `Signal`: Represents trading signals (BUY, SELL, HOLD)
+  - `Position`: Represents open trading positions
+  - `TradingStrategy`: Base class for strategy implementation
+- **Reusability**: Used by both backtesting and live execution
+- **Customization**: Override `calculate_signal()` method with your strategy logic
+
+#### 4. **run_all.py** - Pipeline Orchestrator
+
+- **Purpose**: Orchestrates the complete trading workflow
+- **Phases**:
+  1. Strategy Backtesting (Phase 1)
+  2. Live Trading Execution (Phase 2)
+- **Flexibility**: Can skip phases with command-line flags
+- **Run**: `python run_all.py`
+
+### Workflow
+
+#### Option 1: Run Complete Pipeline
+
+```bash
+python run_all.py
+```
+
+This will:
+
+1. Run backtesting with historical data
+2. Run live trading execution
+
+#### Option 2: Run Backtesting Only
+
+```bash
+python backtest_strategy.py
+# or
+python run_all.py --skip-live
+```
+
+#### Option 3: Run Live Trading Only
+
+```bash
+python main.py
+# or
+python run_all.py --skip-backtest
+```
+
+### Separation of Concerns
+
+| Aspect           | Backtesting                      | Live Trading             |
+| ---------------- | -------------------------------- | ------------------------ |
+| **Data Source**  | Historical data from DataService | Live data from WebSocket |
+| **Purpose**      | Strategy development & testing   | Real-time execution      |
+| **Dependencies** | DataService API                  | WebSocket connection     |
+| **Execution**    | Batch processing                 | Real-time streaming      |
+| **File**         | `backtest_strategy.py`           | `main.py`                |
+
+### Benefits of This Architecture
+
+✅ **Decoupled Design** - Data fetching and execution are independent
+✅ **Flexibility** - Run backtesting without simulator, or live trading without historical data
+✅ **Reusability** - Strategy logic is shared between both phases
+✅ **Scalability** - Easy to add multiple strategies or execution modes
+✅ **Testability** - Each component can be tested independently
+✅ **Maintainability** - Clear responsibilities for each module
+
 ## Next Steps
 
-1. **Run the basic example**: `python main.py`
-2. **Explore the demo**: `python -m simutrador_client.demo.demo_sdk_usage`
-3. **Build your trading strategy** using the WebSocket API
+1. **Customize your strategy**: Edit the `calculate_signal()` method in `strategy.py`
+2. **Run backtesting**: `python backtest_strategy.py` to test with historical data
+3. **Run live trading**: `python main.py` to execute with live data
+4. **Run complete pipeline**: `python run_all.py` to run both phases
+5. **Explore the demo**: `python -m simutrador_client.demo.demo_sdk_usage`
