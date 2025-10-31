@@ -1,5 +1,6 @@
 from .auth import AuthClient, get_auth_client
 from .settings import get_settings
+from .websocket import SimutradorClientSession
 
 __all__ = [
     "__version__",
@@ -8,6 +9,8 @@ __all__ = [
     # Auth
     "AuthClient",
     "get_auth_client",
+    # WebSocket client
+    "SimutradorClientSession",
 ]
 
 __version__ = "0.1.0"
