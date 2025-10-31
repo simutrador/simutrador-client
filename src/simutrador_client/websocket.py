@@ -143,7 +143,8 @@ class SimutradorClientSession:
         created = await fut
         session_id_any = created.get("session_id")
         if not isinstance(session_id_any, str):
-            raise SessionProtocolError("Invalid session_created payload: missing or non-string session_id")
+            raise SessionProtocolError("Invalid session_created payload: missing or non-string" \
+            " session_id")
         session_id = session_id_any
         # Create a per-session pending holder for subsequent waits
         self._pending_by_session.setdefault(session_id, _Pending())
@@ -217,7 +218,8 @@ class SimutradorClientSession:
 
         if typ == "session_created":
             # Resolve by request_id
-            fut: asyncio.Future[dict[str, Any]] | None = self._pending_by_request.pop(rid, None) if rid else None
+            fut: asyncio.Future[dict[str, Any]] | None = self._pending_by_request.pop(rid, None) \
+                if rid else None
             if fut is not None and not fut.done():
                 if "session_id" not in data or not isinstance(data["session_id"], str):
                     fut.set_exception(
