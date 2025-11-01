@@ -28,6 +28,7 @@ class AuthSettings(BaseModel):
     api_key: str = Field(
         default="",
         description="API key for authentication",
+        validation_alias="SIMUTRADOR_API_KEY",
     )
     server_url: str = Field(
         default="http://127.0.0.1:8001",
@@ -121,11 +122,6 @@ class ClientSettings(BaseSettings):
 def get_settings() -> ClientSettings:
     logger.debug("Loading client settings from environment")
     settings = ClientSettings()
-
-    # If SIMUTRADOR_API_KEY is explicitly set, ensure it populates auth.api_key
-    sim_key = os.environ.get("SIMUTRADOR_API_KEY")
-    if sim_key is not None:
-        settings.auth.api_key = sim_key
 
     logger.info("Client settings loaded successfully")
     return settings

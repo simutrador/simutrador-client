@@ -1,6 +1,6 @@
 [project]
 name = "simutrador-client"
-version = "0.2.0"
+version = "0.2.1"
 description = "Official SimuTrador Python client SDK to connect to the simulation engine via WebSocket"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -31,16 +31,13 @@ async def main():
 asyncio.run(main())
 ```
 
-Notes:
-
-*   Copy .env.sample to .env and set SIMUTRADOR_API_KEY to avoid passing the key in code
-*   In the next iteration, a typed `SimulationClient.start_simulation(...)` will replace the raw dict payloads and return Pydantic models from simutrador-core
 
 ### CLI demo (local testing)
 
 A simple CLI demo is available under `demo/cli_demo.py` for local testing of authentication and WebSocket health. This CLI is not part of the SDK and is not installed as a console script.
 
 - Example:
+  - `python demo/cli_demo.py auth login` (uses SIMUTRADOR_API_KEY from .env)
   - `python demo/cli_demo.py auth login --api-key YOUR_KEY`
   - `python demo/cli_demo.py auth status`
   - `python demo/cli_demo.py health --url ws://127.0.0.1:8003/ws/health`
