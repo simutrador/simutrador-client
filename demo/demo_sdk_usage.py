@@ -10,7 +10,7 @@ Usage:
 
 Requirements:
     - SimuTrador server running (default: http://127.0.0.1:8001)
-    - Valid API key (set via AUTH__API_KEY environment variable or .env file)
+    - Valid API key (set via SIMUTRADOR_API_KEY environment variable or .env file)
     - Network connectivity to the server
 
 This demo covers:
@@ -173,12 +173,12 @@ class SimuTraderDemo:
                 return True
 
             # Get API key from environment or settings
-            api_key = os.getenv("AUTH__API_KEY") or self.settings.auth.api_key
+            api_key = os.getenv("SIMUTRADOR_API_KEY") or self.settings.auth.api_key
             if not api_key:
                 logger.error(
-                    "❌ No API key found. Set AUTH__API_KEY environment variable."
+                    "❌ No API key found. Set SIMUTRADOR_API_KEY environment variable."
                 )
-                logger.error("💡 Example: export AUTH__API_KEY=sk_your_api_key_here")
+                logger.error("💡 Example: export SIMUTRADOR_API_KEY=sk_your_api_key_here")
                 return False
 
             # Perform authentication

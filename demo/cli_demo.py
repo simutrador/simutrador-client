@@ -38,7 +38,7 @@ def _build_parser() -> argparse.ArgumentParser:
     login.add_argument(
         "--api-key",
         required=False,
-        help="Your SimuTrador API key (optional if set in AUTH__API_KEY)",
+        help="Your SimuTrador API key (optional if set in SIMUTRADOR_API_KEY)",
     )
     login.add_argument(
         "--server-url",
@@ -89,7 +89,7 @@ async def _run_auth_login(
         if not api_key or not api_key.strip():
             logger.warning("No API key provided via CLI or settings")
             print(
-                "❌ API key required. Set AUTH__API_KEY in .env or use --api-key",
+                "❌ API key required. Set SIMUTRADOR_API_KEY in .env or use --api-key",
                 file=sys.stderr,
             )
             return 1

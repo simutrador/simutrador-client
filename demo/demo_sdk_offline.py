@@ -81,7 +81,7 @@ class StrategyDeveloperExample:
 
         # Show how to override settings
         logger.info("\n💡 Configuration can be overridden via:")
-        logger.info("  • Environment variables: AUTH__API_KEY=your_key")
+        logger.info("  • Environment variables: SIMUTRADOR_API_KEY=your_key")
         logger.info("  • .env file: SESSION__DEFAULT_INITIAL_CAPITAL=50000.00")
         logger.info("  • Constructor parameters: get_auth_client('http://custom-url')")
 

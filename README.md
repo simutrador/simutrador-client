@@ -9,9 +9,9 @@ import websockets
 from simutrador_client import get_auth_client, get_settings
 
 async def main():
-    # 1) Authenticate (uses AUTH__API_KEY from your .env if not passed explicitly)
+    # 1) Authenticate (uses SIMUTRADOR_API_KEY from your .env if not passed explicitly)
     auth = get_auth_client()
-    # await auth.login("sk_your_api_key")  # or set AUTH__API_KEY in .env and call this once
+    # await auth.login("sk_your_api_key")  # or set SIMUTRADOR_API_KEY in .env and call this once
 
     # 2) Build an authenticated WS URL to the server's simulation endpoint
     base = get_settings().server.websocket.url.rstrip("/")
@@ -33,7 +33,7 @@ asyncio.run(main())
 
 Notes:
 
-*   Copy .env.sample to .env and set AUTH\_\_API\_KEY to avoid passing the key in code
+*   Copy .env.sample to .env and set SIMUTRADOR_API_KEY to avoid passing the key in code
 *   In the next iteration, a typed `SimulationClient.start_simulation(...)` will replace the raw dict payloads and return Pydantic models from simutrador-core
 
 ### CLI demo (local testing)

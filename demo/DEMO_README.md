@@ -206,7 +206,7 @@ fi
 
 ```
 # Authentication
-export AUTH__API_KEY=sk_your_api_key_here
+export SIMUTRADOR_API_KEY=sk_your_api_key_here
 export AUTH__SERVER_URL=http://localhost:8001
 
 # Session defaults
@@ -251,7 +251,7 @@ When adding new features to the SDK:
 
 **Authentication Failed**:
 
-*   Check API key is set: `echo $AUTH__API_KEY`
+*   Check API key is set: `echo $SIMUTRADOR_API_KEY`
 *   Verify server is running: `curl http://localhost:8001/health`
 *   Check server logs for authentication errors
 
@@ -279,8 +279,8 @@ uv sync
 ```
 
 ```
-export AUTH__API_KEY=sk_your_api_key_here
-# OR create .env file with AUTH__API_KEY=sk_your_api_key_here
+export SIMUTRADOR_API_KEY=sk_your_api_key_here
+# OR create .env file with SIMUTRADOR_API_KEY=sk_your_api_key_here
 ```
 
 ```
