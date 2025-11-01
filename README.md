@@ -1,43 +1,47 @@
-### Programmatic usage (SDK)
 
-A minimal example to authenticate and build an authenticated WebSocket URL (current SDK primitives). Simulation APIs will be fully typed in the next step, but you can already use the building blocks:
+````mermaid
+sequenceDiagram
+autonumber
+actor APP as demo/demo_sdk_usage.py
+participant WS as src/simutrador_client/websocket.py
+participant SRV as server:/ws/simulate
 
-```
-# example.py
-import asyncio, json
-import websockets
-from simutrador_client import get_auth_client, get_settings
+APP->>WS: async with WS: connect()
+WS->>SRV: Open WebSocket (compose_ws_url -> /ws/simulate)
+WS->>WS: Start _recv_loop()
 
-async def main():
-    # 1) Authenticate (uses SIMUTRADOR_API_KEY from your .env if not passed explicitly)
-    auth = get_auth_client()
-    # await auth.login("sk_your_api_key")  # or set SIMUTRADOR_API_KEY in .env and call this once
+APP->>WS: start_simulation(...)
+WS->>SRV: send {type:start_simulation, request_id}
+SRV-->>WS: {type:session_created, request_id, data.session_id}
+WS->>WS: _dispatch -> resolve request future
+WS-->>APP: return session_id
 
-    # 2) Build an authenticated WS URL to the server's simulation endpoint
-    base = get_settings().server.websocket.url.rstrip("/")
-    ws_url = auth.get_websocket_url(f"{base}/ws/simulate")
+APP->>WS: wait_for_history_snapshot(session_id)
+SRV-->>WS: {type:history_snapshot, data.session_id}
+WS->>WS: _dispatch -> pending[session].history.set_result
+WS-->>APP: return history snapshot
 
-    # 3) Send a start_simulation message (temporary untyped payload)
-    async with websockets.connect(ws_url, ping_interval=None) as ws:
-        payload = {"type": "start_simulation", "request_id": "req-1", "data": {
-            "symbols": ["AAPL"],
-            "start_date": "2023-01-01",
-            "end_date": "2023-12-31",
-            "initial_capital": 100000.0,
-        }}
-        await ws.send(json.dumps(payload))
-        print(await ws.recv())
+APP->>WS: subscribe_ticks / subscribe_fills / subscribe_account
+WS-->>APP: return asyncio.Queue per subscription
 
-asyncio.run(main())
-```
+par Streaming
+  SRV-->>WS: {type:tick}           ; WS->>APP: enqueue -> ticks_q.get()
+and
+  SRV-->>WS: {type:execution_report}; WS->>APP: enqueue -> fills_q.get()
+and
+  SRV-->>WS: {type:account_snapshot}; WS->>APP: enqueue -> account_q.get()
+end
 
+APP->>WS: wait_for_simulation_end(session_id)
+SRV-->>WS: {type:simulation_end}
+WS->>WS: _dispatch -> pending[session].ended.set_result
+WS-->>APP: return simulation_end
 
-### CLI demo (local testing)
+alt session_error path
+  SRV-->>WS: {type:session_error, error_code, message}
+  WS-->>APP: raise SessionError (pending waiter/request)
+end
 
-A simple CLI demo is available under `demo/cli_demo.py` for local testing of authentication and WebSocket health. This CLI is not part of the SDK and is not installed as a console script.
-
-- Example:
-  - `python demo/cli_demo.py auth login` (uses SIMUTRADOR_API_KEY from .env)
-  - `python demo/cli_demo.py auth login --api-key YOUR_KEY`
-  - `python demo/cli_demo.py auth status`
-  - `python demo/cli_demo.py health --url ws://127.0.0.1:8003/ws/health`
+APP->>WS: close()
+WS->>SRV: Close WebSocket
+````

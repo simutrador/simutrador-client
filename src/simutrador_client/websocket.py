@@ -32,6 +32,7 @@ class SessionError(Exception):
 class _Pending:
     created: asyncio.Future[dict[str, Any]] | None = None
     history: asyncio.Future[SimpleNamespace] | None = None
+    ended: asyncio.Future[SimpleNamespace] | None = None
 
 
 class SimutradorClientSession:
@@ -56,6 +57,11 @@ class SimutradorClientSession:
         self._reader_task: asyncio.Task[Any] | None = None
         self._pending_by_request: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._pending_by_session: dict[str, _Pending] = {}
+        # Per-session event queues
+        self._tick_queues: dict[str, asyncio.Queue[SimpleNamespace]] = {}
+        self._fill_queues: dict[str, asyncio.Queue[SimpleNamespace]] = {}
+        self._account_queues: dict[str, asyncio.Queue[SimpleNamespace]] = {}
+
         self._closed = False
 
     async def __aenter__(self) -> SimutradorClientSession:
@@ -164,6 +170,34 @@ class SimutradorClientSession:
         if timeout is None:
             return await pending.history  # type: ignore[return-value]
         return await asyncio.wait_for(pending.history, timeout=timeout)
+    # ------------------------
+    # Subscriptions / waits
+    # ------------------------
+
+    def subscribe_ticks(self, session_id: str) -> asyncio.Queue[SimpleNamespace]:
+        """Get or create a tick queue for a session."""
+        return self._get_queue(self._tick_queues, session_id)
+
+    def subscribe_fills(self, session_id: str) -> asyncio.Queue[SimpleNamespace]:
+        """Get or create a fills (execution_report) queue for a session."""
+        return self._get_queue(self._fill_queues, session_id)
+
+    def subscribe_account(self, session_id: str) -> asyncio.Queue[SimpleNamespace]:
+        """Get or create an account_snapshot queue for a session."""
+        return self._get_queue(self._account_queues, session_id)
+
+    async def wait_for_simulation_end(
+        self, session_id: str, timeout: float | None = None
+    ) -> SimpleNamespace:
+        """Wait for simulation_end for the given session."""
+        self._ensure_connected()
+        pending = self._pending_by_session.setdefault(session_id, _Pending())
+        if pending.ended is None or pending.ended.done():
+            pending.ended = asyncio.get_running_loop().create_future()
+        if timeout is None:
+            return await pending.ended  # type: ignore[return-value]
+        return await asyncio.wait_for(pending.ended, timeout=timeout)
+
 
     # ------------------------
     # Internal helpers
@@ -182,6 +216,16 @@ class SimutradorClientSession:
                 "WebSocket is not connected. "
                 "Call connect() first or use 'async with'."
             )
+    def _get_queue(
+        self, mapping: dict[str, asyncio.Queue[SimpleNamespace]], session_id: str
+    ) -> asyncio.Queue[SimpleNamespace]:
+        existing = mapping.get(session_id)
+        if existing is not None:
+            return existing
+        new_q: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
+        mapping[session_id] = new_q
+        return new_q
+
 
 
     async def _recv_loop(self) -> None:
@@ -260,6 +304,45 @@ class SimutradorClientSession:
             if rid and (rf := self._pending_by_request.pop(rid, None)) and not rf.done():
                 rf.set_exception(err)
             return
+        if typ == "batch_ack":
+            # Resolve by request_id (orders API should set request_id)
+            fut = self._pending_by_request.pop(rid, None) if rid else None
+            if fut is not None and not fut.done():
+                fut.set_result(data)
+            return
+
+        if typ == "tick":
+            sess_id_any = data.get("session_id")
+            sess_id: str | None = sess_id_any if isinstance(sess_id_any, str) else None
+            if sess_id:
+                self._get_queue(self._tick_queues, sess_id).put_nowait(SimpleNamespace(**data))
+            return
+
+        if typ == "execution_report":
+            sess_id_any = data.get("session_id")
+            sess_id: str | None = sess_id_any if isinstance(sess_id_any, str) else None
+            if sess_id:
+                self._get_queue(self._fill_queues, sess_id).put_nowait(SimpleNamespace(**data))
+            return
+
+        if typ == "account_snapshot":
+            sess_id_any = data.get("session_id")
+            sess_id: str | None = sess_id_any if isinstance(sess_id_any, str) else None
+            if sess_id:
+                self._get_queue(self._account_queues, sess_id).put_nowait(SimpleNamespace(**data))
+            return
+
+        if typ == "simulation_end":
+            sess_id_any = data.get("session_id")
+            sess_id: str | None = sess_id_any if isinstance(sess_id_any, str) else None
+            if sess_id:
+                p = self._pending_by_session.setdefault(sess_id, _Pending())
+                if p.ended is None or p.ended.done():
+                    p.ended = asyncio.get_running_loop().create_future()
+                if not p.ended.done():
+                    p.ended.set_result(SimpleNamespace(**data))
+            return
+
 
     def _fail_all_pending(self, exc: Exception) -> None:
         for fut in self._pending_by_request.values():

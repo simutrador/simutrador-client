@@ -14,7 +14,7 @@
   "typeCheckingMode": "strict",
   "executionEnvironments": [
     { "root": "src" },
-    { "root": "tests", "extraPaths": ["src"], "reportPrivateUsage": "none" }
+    { "root": "tests", "extraPaths": ["src", "demo"], "reportPrivateUsage": "none" }
   ],
   "reportMissingTypeStubs": "none"
 }

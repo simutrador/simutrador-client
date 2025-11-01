@@ -33,10 +33,10 @@ This demo script serves as **active documentation** and **end-to-end testing** f
 
 ```
 # From simutrador-client directory
-uv run python demo_sdk_usage.py
+uv run python demo/demo_ws_minimal.py
 
-# With custom server URL
-uv run python demo_sdk_usage.py http://localhost:8001
+# With custom server URL and waiting for end
+uv run python demo/demo_ws_minimal.py --server-url http://localhost:8001 --wait-end
 ```
 
 ## 📋 What the Demo Covers
@@ -106,13 +106,25 @@ await trading_client.place_order(
 )
 ```
 
-#### **Market Data Streaming** (Planned)
+#### **Market Data Streaming** (Implemented)
 
 ```python
-# Future implementation
-market_client = get_market_data_client()
-async for data in market_client.stream_quotes(session_id, ["AAPL"]):
-    print(f"AAPL: ${data.price}")
+from simutrador_client.websocket import SimutradorClientSession
+from datetime import datetime
+
+async with SimutradorClientSession() as s:
+    sid = await s.start_simulation(
+        symbols=["AAPL"],
+        start_date=datetime(2023, 1, 1),
+        end_date=datetime(2023, 1, 10),
+        initial_capital=10000.0,
+        timeframe="1d",
+        warmup_bars=5,
+    )
+    await s.wait_for_history_snapshot(sid)
+    ticks_q = s.subscribe_ticks(sid)
+    tick = await ticks_q.get()
+    print("tick:", getattr(tick, "session_id", sid))
 ```
 
 #### **Strategy Framework** (Planned)
