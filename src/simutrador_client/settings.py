@@ -28,7 +28,6 @@ class AuthSettings(BaseModel):
     api_key: str = Field(
         default="",
         description="API key for authentication",
-        validation_alias="SIMUTRADOR_API_KEY",
     )
     server_url: str = Field(
         default="http://127.0.0.1:8001",
@@ -116,12 +115,18 @@ class ClientSettings(BaseSettings):
     server: ServerSettings = Field(default_factory=ServerSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     session: SessionSettings = Field(default_factory=SessionSettings)
+    # Accept top-level SIMUTRADOR_API_KEY to avoid extra_forbidden and map to auth.api_key
+    simutrador_api_key: str | None = Field(default=None)
 
 
 @lru_cache
 def get_settings() -> ClientSettings:
     logger.debug("Loading client settings from environment")
     settings = ClientSettings()
+
+    # Precedence: AUTH__API_KEY (nested) > SIMUTRADOR_API_KEY (top-level alias)
+    if (not settings.auth.api_key) and settings.simutrador_api_key:
+        settings.auth.api_key = settings.simutrador_api_key
 
     logger.info("Client settings loaded successfully")
     return settings
