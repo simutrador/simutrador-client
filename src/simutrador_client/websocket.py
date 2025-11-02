@@ -12,7 +12,6 @@ import websockets
 
 from .auth import AuthClient, AuthenticationError, get_auth_client
 from .settings import get_settings
-
 from .store import Store
 
 
