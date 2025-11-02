@@ -3,6 +3,7 @@ from importlib.metadata import version as _pkg_version
 
 from .auth import AuthClient, get_auth_client
 from .settings import get_settings
+from .strategy import Strategy
 from .websocket import SimutradorClientSession
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "get_auth_client",
     # WebSocket client
     "SimutradorClientSession",
+    "Strategy",
 ]
 
 def _resolve_version() -> str:

@@ -13,6 +13,7 @@ import websockets
 from .auth import AuthClient, AuthenticationError, get_auth_client
 from .settings import get_settings
 from .store import Store
+from .strategy import Strategy
 
 
 class SessionProtocolError(Exception):
@@ -49,15 +50,20 @@ class SimutradorClientSession:
     - Errors of type session_error with DATA_FETCH_FAILED are surfaced as SessionError.
     """
 
-    def __init__(self, auth: AuthClient | None = None, base_ws_url: str | None = None) -> None:
+    def __init__(self, *, strategy: Strategy, auth: AuthClient | None = None, base_ws_url: str |\
+                  None = None) -> None:
         self._settings = get_settings()
         self._auth: AuthClient = auth or get_auth_client(self._settings.auth.server_url)
         self._base_ws_url: str = (base_ws_url or self._settings.server.websocket.url).rstrip("/")
+        self._strategy: Strategy = strategy
 
         self._ws: Any = None
         self._reader_task: asyncio.Task[Any] | None = None
         self._pending_by_request: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._pending_by_session: dict[str, _Pending] = {}
+        # Per-request/session metadata for strategy callbacks
+        self._req_meta_by_rid: dict[str, dict[str, Any]] = {}
+        self._session_meta: dict[str, dict[str, Any]] = {}
         # Per-session event queues
         self._tick_queues: dict[str, asyncio.Queue[SimpleNamespace]] = {}
         self._fill_queues: dict[str, asyncio.Queue[SimpleNamespace]] = {}
@@ -144,6 +150,8 @@ class SimutradorClientSession:
 
         rid = request_id or str(uuid4())
         payload = {"type": "start_simulation", "request_id": rid, "data": data}
+        # Map request metadata to request_id for later use with session_id
+        self._req_meta_by_rid[rid] = data
 
         # Prepare future and send
         fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
@@ -202,6 +210,17 @@ class SimutradorClientSession:
         if timeout is None:
             return await pending.ended  # type: ignore[return-value]
         return await asyncio.wait_for(pending.ended, timeout=timeout)
+
+    async def run(self, **start_kwargs: Any) -> str:
+        """Start a simulation and block until it ends.
+
+        Strategy callbacks are invoked internally from the receive loop.
+        Returns the session_id for the started simulation.
+        """
+        self._ensure_connected()
+        session_id = await self.start_simulation(**start_kwargs)
+        await self.wait_for_simulation_end(session_id)
+        return session_id
 
     # ------------------------
     # Store access
@@ -295,15 +314,20 @@ class SimutradorClientSession:
 
         if typ == "session_created":
             # Resolve by request_id
-            fut: asyncio.Future[dict[str, Any]] | None = self._pending_by_request.pop(rid, None) \
-                if rid else None
+            fut: asyncio.Future[dict[str, Any]] | None = self._pending_by_request.pop(rid, None) if\
+                rid else None
             if fut is not None and not fut.done():
-                if "session_id" not in data or not isinstance(data["session_id"], str):
-                    fut.set_exception(
-                        SessionProtocolError("Invalid session_created payload: missing session_id")
-                    )
+                sid_val: Any = data.get("session_id")
+                if not isinstance(sid_val, str):
+                    fut.set_exception(SessionProtocolError("Invalid session_created payload: " \
+                    "missing session_id"))
                 else:
                     fut.set_result(data)
+                    # Map request metadata from request_id to session_id for strategy meta
+                    if rid is not None:
+                        meta = self._req_meta_by_rid.pop(rid, None)
+                        if meta is not None:
+                            self._session_meta[sid_val] = meta
             return
 
         if typ == "history_snapshot":
@@ -313,13 +337,19 @@ class SimutradorClientSession:
                 return
             # Build and store the per-session Store from the warmup snapshot
             snap = SimpleNamespace(**data)
-            self._stores[sess_id] = Store.from_history(snap)
+            st = Store.from_history(snap)
+            self._stores[sess_id] = st
             # Mark store as ready
             self._store_ready_events.setdefault(sess_id, asyncio.Event()).set()
             # Maintain backward compatibility: resolve waiter if present
             pending = self._pending_by_session.get(sess_id)
             if pending and pending.history is not None and not pending.history.done():
                 pending.history.set_result(snap)
+            # Strategy: notify session start (warmup ready)
+            try:
+                await self._strategy.on_session_start(sess_id, st, self._session_meta.get(sess_id))
+            except Exception:
+                pass
             return
 
         if typ == "session_error":
@@ -355,9 +385,14 @@ class SimutradorClientSession:
             sess_id: str | None = sess_id_any if isinstance(sess_id_any, str) else None
             if sess_id:
                 tick_obj = SimpleNamespace(**data)
-                # Update store if available
-                if (st := self._stores.get(sess_id)) is not None:
+                # Update store and invoke strategy if available
+                st = self._stores.get(sess_id)
+                if st is not None:
                     st.apply_tick(tick_obj)
+                    try:
+                        await self._strategy.on_tick(sess_id, tick_obj, st)
+                    except Exception:
+                        pass
                 # Fan out to subscribers
                 self._get_queue(self._tick_queues, sess_id).put_nowait(tick_obj)
             return
@@ -366,25 +401,46 @@ class SimutradorClientSession:
             sess_id_any = data.get("session_id")
             sess_id: str | None = sess_id_any if isinstance(sess_id_any, str) else None
             if sess_id:
-                self._get_queue(self._fill_queues, sess_id).put_nowait(SimpleNamespace(**data))
+                fill_obj = SimpleNamespace(**data)
+                self._get_queue(self._fill_queues, sess_id).put_nowait(fill_obj)
+                st = self._stores.get(sess_id)
+                if st is not None:
+                    try:
+                        await self._strategy.on_fill(sess_id, fill_obj, st)
+                    except Exception:
+                        pass
             return
 
         if typ == "account_snapshot":
             sess_id_any = data.get("session_id")
             sess_id: str | None = sess_id_any if isinstance(sess_id_any, str) else None
             if sess_id:
-                self._get_queue(self._account_queues, sess_id).put_nowait(SimpleNamespace(**data))
+                acc_obj = SimpleNamespace(**data)
+                self._get_queue(self._account_queues, sess_id).put_nowait(acc_obj)
+                st = self._stores.get(sess_id)
+                if st is not None:
+                    try:
+                        await self._strategy.on_account_snapshot(sess_id, acc_obj, st)
+                    except Exception:
+                        pass
             return
 
         if typ == "simulation_end":
             sess_id_any = data.get("session_id")
             sess_id: str | None = sess_id_any if isinstance(sess_id_any, str) else None
             if sess_id:
+                end_obj = SimpleNamespace(**data)
                 p = self._pending_by_session.setdefault(sess_id, _Pending())
                 if p.ended is None or p.ended.done():
                     p.ended = asyncio.get_running_loop().create_future()
                 if not p.ended.done():
-                    p.ended.set_result(SimpleNamespace(**data))
+                    p.ended.set_result(end_obj)
+                st = self._stores.get(sess_id)
+                if st is not None:
+                    try:
+                        await self._strategy.on_session_end(sess_id, end_obj, st)
+                    except Exception:
+                        pass
             return
 
 
