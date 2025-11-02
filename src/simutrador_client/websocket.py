@@ -13,6 +13,8 @@ import websockets
 from .auth import AuthClient, AuthenticationError, get_auth_client
 from .settings import get_settings
 
+from .store import Store
+
 
 class SessionProtocolError(Exception):
     """Raised when the WebSocket protocol returns an unexpected message or shape."""
@@ -61,6 +63,10 @@ class SimutradorClientSession:
         self._tick_queues: dict[str, asyncio.Queue[SimpleNamespace]] = {}
         self._fill_queues: dict[str, asyncio.Queue[SimpleNamespace]] = {}
         self._account_queues: dict[str, asyncio.Queue[SimpleNamespace]] = {}
+
+        # Per-session data stores and readiness events
+        self._stores: dict[str, Store] = {}
+        self._store_ready_events: dict[str, asyncio.Event] = {}
 
         self._closed = False
 
@@ -198,6 +204,34 @@ class SimutradorClientSession:
             return await pending.ended  # type: ignore[return-value]
         return await asyncio.wait_for(pending.ended, timeout=timeout)
 
+    # ------------------------
+    # Store access
+    # ------------------------
+
+    def get_store(self, session_id: str) -> Store | None:
+        """Return the auto-managed Store for a session if initialized, else None."""
+        return self._stores.get(session_id)
+
+    def is_store_ready(self, session_id: str) -> bool:
+        ev = self._store_ready_events.get(session_id)
+        return ev.is_set() if ev is not None else False
+
+    async def wait_for_store_ready(self, session_id: str, timeout: float | None = None) -> Store:
+        """Wait until the per-session Store is initialized from warmup and return it.
+
+        This awaits the first history_snapshot for the session. If timeout is provided,
+        it will be enforced; otherwise this will wait indefinitely.
+        """
+        ev = self._store_ready_events.setdefault(session_id, asyncio.Event())
+        if timeout is None:
+            await ev.wait()
+        else:
+            await asyncio.wait_for(ev.wait(), timeout=timeout)
+        st = self._stores.get(session_id)
+        if st is None:
+            raise SessionProtocolError(f"Store not available for session {session_id}")
+        return st
+
 
     # ------------------------
     # Internal helpers
@@ -278,9 +312,15 @@ class SimutradorClientSession:
             sess_id: str | None = sess_id_any if isinstance(sess_id_any, str) else None
             if not sess_id:
                 return
+            # Build and store the per-session Store from the warmup snapshot
+            snap = SimpleNamespace(**data)
+            self._stores[sess_id] = Store.from_history(snap)
+            # Mark store as ready
+            self._store_ready_events.setdefault(sess_id, asyncio.Event()).set()
+            # Maintain backward compatibility: resolve waiter if present
             pending = self._pending_by_session.get(sess_id)
             if pending and pending.history is not None and not pending.history.done():
-                pending.history.set_result(SimpleNamespace(**data))
+                pending.history.set_result(snap)
             return
 
         if typ == "session_error":
@@ -315,7 +355,12 @@ class SimutradorClientSession:
             sess_id_any = data.get("session_id")
             sess_id: str | None = sess_id_any if isinstance(sess_id_any, str) else None
             if sess_id:
-                self._get_queue(self._tick_queues, sess_id).put_nowait(SimpleNamespace(**data))
+                tick_obj = SimpleNamespace(**data)
+                # Update store if available
+                if (st := self._stores.get(sess_id)) is not None:
+                    st.apply_tick(tick_obj)
+                # Fan out to subscribers
+                self._get_queue(self._tick_queues, sess_id).put_nowait(tick_obj)
             return
 
         if typ == "execution_report":

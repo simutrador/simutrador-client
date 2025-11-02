@@ -3,7 +3,7 @@
 Minimal WebSocket demo for SimuTrador SDK
 - Authenticates (if needed) using SIMUTRADOR_API_KEY
 - Uses SimutradorClientSession to start a simulation
-- Waits for history_snapshot, builds Store, and consumes a few ticks
+- Awaits Store readiness (warmup ingested) and consumes a few ticks
 - Optionally waits for simulation_end with --wait-end
 
 Usage:
@@ -23,7 +23,6 @@ from datetime import UTC, datetime
 
 from simutrador_client.auth import AuthenticationError, get_auth_client
 from simutrador_client.settings import get_settings
-from simutrador_client.store import Store
 from simutrador_client.websocket import SessionError, SimutradorClientSession
 
 
@@ -74,10 +73,18 @@ async def main() -> int:
             )
             print(f"session_created: {session_id}")
 
-            # Wait for warmup history, build the store
-            hist = await sess.wait_for_history_snapshot(session_id, timeout=30.0)
-            store = Store.from_history(hist)
-            print("history_snapshot: received; initialized store")
+            # Wait for warmup to be ingested into the auto-managed Store
+            store = await sess.wait_for_store_ready(session_id, timeout=30.0)
+
+            # Diagnostic: list symbols and bar counts from the store
+            try:
+                symbols = list(getattr(store, "_by_symbol", {}).keys())
+                print(f"Warmup ready; symbols: {symbols}")
+                for symbol in symbols:
+                    ser = store._get_series(symbol)  # noqa: SLF001 (demo)
+                    print(f"  {symbol}: {len(ser.close)} bars")
+            except Exception:
+                pass
 
             # Subscribe to streaming events
             ticks_q = sess.subscribe_ticks(session_id)
@@ -93,14 +100,6 @@ async def main() -> int:
                 except TimeoutError:
                     print("tick: timeout waiting for data (this can happen on quiet data windows)")
                     break
-                # Apply to store if tick carries candles
-                try:
-                    # Expecting tick.data-like shape with 'candles'
-                    data = tick.__dict__ if hasattr(tick, "__dict__") else {}
-                    if isinstance(data, dict) and isinstance(data.get("candles"), dict):
-                        store.apply_tick(tick)
-                except Exception:
-                    pass
                 # Print a compact summary
                 summary = {
                     "session_id": getattr(tick, "session_id", session_id),
