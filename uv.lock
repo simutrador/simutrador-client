@@ -518,7 +518,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pydantic-settings", specifier = ">=2.10.0" },
-    { name = "simutrador-core", index = "https://test.pypi.org/simple/" },
+    { name = "simutrador-core", specifier = ">=1.0.18", index = "https://test.pypi.org/simple/" },
     { name = "websockets", specifier = ">=12.0" },
 ]
 
