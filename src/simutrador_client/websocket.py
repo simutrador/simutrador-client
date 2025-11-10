@@ -94,6 +94,16 @@ class SimutradorClientSession:
         ws_url = self._compose_ws_url()
         self._ws = await websockets.connect(ws_url)
         self._reader_task = asyncio.create_task(self._recv_loop())
+        # Optional strategy session hook: allow strategies to keep a handle
+        hook = getattr(self._strategy, "set_session", None)
+        try:
+            if callable(hook):
+                _res = hook(self)
+                if asyncio.iscoroutine(_res):
+                    await _res
+        except Exception:
+            # Ignore hook errors in MVP
+            pass
 
     async def close(self) -> None:
         """Close the WebSocket connection and cancel background tasks."""
@@ -249,6 +259,97 @@ class SimutradorClientSession:
         if st is None:
             raise SessionProtocolError(f"Store not available for session {session_id}")
         return st
+
+
+    # ------------------------
+    # Orders API (Phase 1)
+    # ------------------------
+    async def submit_orders(
+        self,
+        session_id: str,
+        orders: list[dict[str, Any]],
+        *,
+        batch_id: str | None = None,
+        execution_mode: str = "best_effort",
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Submit a batch of orders and await batch_ack.
+
+        This is an MVP client-side convenience. Server-side handling will land in Phase 2.
+        """
+        self._ensure_connected()
+
+        rid = request_id or str(uuid4())
+        bid = batch_id or str(uuid4())
+        data: dict[str, Any] = {
+            "session_id": session_id,
+            "batch_id": bid,
+            "orders": orders,
+            "execution_mode": execution_mode,
+        }
+        payload = {"type": "order_batch", "request_id": rid, "data": data}
+
+        # Prepare future and send
+        fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+        self._pending_by_request[rid] = fut
+        assert self._ws is not None
+        try:
+            await self._ws.send(json.dumps(payload))
+        except Exception:
+            # Clean up pending future on send failure and re-raise
+            rf = self._pending_by_request.pop(rid, None)
+            if rf is not None and not rf.done():
+                rf.set_exception(SessionProtocolError("Failed to send order_batch"))
+            raise
+
+        ack = await fut
+        # Minimal validation of expected fields
+        if not isinstance(ack.get("batch_id"), str):
+            raise SessionProtocolError("Invalid batch_ack payload: missing or non-string batch_id")
+        if not isinstance(ack.get("accepted_orders"), list):
+            raise SessionProtocolError("Invalid batch_ack payload: accepted_orders must be a list")
+        if not isinstance(ack.get("rejected_orders"), dict):
+            raise SessionProtocolError("Invalid batch_ack payload: rejected_orders must be an object")
+        return ack
+
+    async def place_bracket_order(
+        self,
+        session_id: str,
+        *,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: int,
+        price: float | int | str | None = None,
+        stop_loss: float | int | str | None = None,
+        take_profit: float | int | str | None = None,
+        tif: str = "day",
+        batch_id: str | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Convenience method to place a single order with optional bracket (stop/target)."""
+        order: dict[str, Any] = {
+            "order_id": str(uuid4()),
+            "symbol": symbol,
+            "side": side,
+            "type": order_type,
+            "quantity": quantity,
+            "time_in_force": tif,
+        }
+        if price is not None:
+            order["price"] = price
+        if stop_loss is not None:
+            order["stop_loss"] = stop_loss
+        if take_profit is not None:
+            order["take_profit"] = take_profit
+
+        return await self.submit_orders(
+            session_id,
+            [order],
+            batch_id=batch_id,
+            execution_mode="best_effort",
+            request_id=request_id,
+        )
 
 
     # ------------------------
