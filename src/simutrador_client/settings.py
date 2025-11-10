@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import os
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from simutrador_core.utils import get_default_logger
@@ -70,47 +70,42 @@ class ServerSettings(BaseModel):
     websocket: WebSocketSettings = Field(default_factory=WebSocketSettings)
 
 
-def _resolve_env_file() -> str | None:
-    """Determine which .env file to load.
+def _project_root() -> Path | None:
+    """Locate the nearest project root by looking for a .git directory."""
+    cur = Path.cwd()
+    while True:
+        if (cur / ".git").exists():
+            return cur
+        if cur.parent == cur:
+            return None
+        cur = cur.parent
 
-    Priority:
-    1) ENV environment variable, if set
-    2) .env in current working directory
-    3) .env found by walking up from this file's directory (up to 5 levels)
-    """
-    env_override = os.getenv("ENV")
-    if env_override:
-        return env_override
 
-    cwd_env = Path.cwd() / ".env"
-    if cwd_env.exists():
-        return str(cwd_env)
-
-    here = Path(__file__).resolve()
-    root = here
-    for _ in range(5):
-        root = root.parent
-        candidate = root / ".env"
-        if candidate.exists():
-            return str(candidate)
-
-    return None
-
+def _env_file_at_root() -> str | None:
+    """Return the path to the project root .env if it exists, else None."""
+    root = _project_root()
+    if root is None:
+        return None
+    p = root / ".env"
+    return str(p) if p.is_file() else None
 
 class ClientSettings(BaseSettings):
-    """Client settings loaded from environment and optional .env file.
+    """Client settings loaded from environment and optional project-root .env.
 
     Environment nesting uses double underscores, e.g.:
       SERVER__WEBSOCKET__URL=ws://localhost:8000
       SESSION__DEFAULT_INITIAL_CAPITAL=50000.00
 
-    The path to a .env file can be overridden with ENV=/path/to/.env.
+    If a .env exists at the project root (nearest directory containing .git),
+    it will be used automatically; otherwise only environment variables are used.
+    Unknown keys are ignored.
     """
 
     model_config = SettingsConfigDict(
-        env_file=_resolve_env_file(),
+        extra="ignore",
         env_nested_delimiter="__",
     )
+
 
     server: ServerSettings = Field(default_factory=ServerSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
@@ -122,11 +117,17 @@ class ClientSettings(BaseSettings):
 @lru_cache
 def get_settings() -> ClientSettings:
     logger.debug("Loading client settings from environment")
+    env_file = _env_file_at_root()
+    if env_file:
+        load_dotenv(env_file)
     settings = ClientSettings()
 
     # Precedence: AUTH__API_KEY (nested) > SIMUTRADOR_API_KEY (top-level alias)
     if (not settings.auth.api_key) and settings.simutrador_api_key:
         settings.auth.api_key = settings.simutrador_api_key
 
-    logger.info("Client settings loaded successfully")
+    logger.info(
+        "Client settings loaded successfully%s",
+        f" from {env_file}" if env_file else "",
+    )
     return settings
