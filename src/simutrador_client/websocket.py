@@ -309,7 +309,8 @@ class SimutradorClientSession:
         if not isinstance(ack.get("accepted_orders"), list):
             raise SessionProtocolError("Invalid batch_ack payload: accepted_orders must be a list")
         if not isinstance(ack.get("rejected_orders"), dict):
-            raise SessionProtocolError("Invalid batch_ack payload: rejected_orders must be an object")
+            raise SessionProtocolError("Invalid batch_ack payload: rejected_orders must be an" \
+            " object")
         return ack
 
     async def place_bracket_order(
