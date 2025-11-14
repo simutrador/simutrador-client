@@ -449,7 +449,9 @@ class SimutradorClientSession:
                 pending.history.set_result(snap)
             # Strategy: notify session start (warmup ready)
             try:
-                await self._strategy.on_session_start(sess_id, st, self._session_meta.get(sess_id))
+                _ = asyncio.create_task(
+                    self._strategy.on_session_start(sess_id, st, self._session_meta.get(sess_id))
+                )
             except Exception:
                 pass
             return
@@ -475,6 +477,13 @@ class SimutradorClientSession:
             if rid and (rf := self._pending_by_request.pop(rid, None)) and not rf.done():
                 rf.set_exception(err)
             return
+
+        if typ == "error":
+            if rid:
+                fut = self._pending_by_request.pop(rid, None)
+                if fut is not None and not fut.done():
+                    fut.set_exception(SessionProtocolError(f"Server error: {data!r}"))
+            return
         if typ == "batch_ack":
             # Resolve by request_id (orders API should set request_id)
             fut = self._pending_by_request.pop(rid, None) if rid else None
@@ -492,7 +501,7 @@ class SimutradorClientSession:
                 if st is not None:
                     st.apply_tick(tick_obj)
                     try:
-                        await self._strategy.on_tick(sess_id, tick_obj, st)
+                        _ = asyncio.create_task(self._strategy.on_tick(sess_id, tick_obj, st))
                     except Exception:
                         pass
                 # Fan out to subscribers
@@ -508,7 +517,7 @@ class SimutradorClientSession:
                 st = self._stores.get(sess_id)
                 if st is not None:
                     try:
-                        await self._strategy.on_fill(sess_id, fill_obj, st)
+                        _ = asyncio.create_task(self._strategy.on_fill(sess_id, fill_obj, st))
                     except Exception:
                         pass
             return
@@ -522,7 +531,8 @@ class SimutradorClientSession:
                 st = self._stores.get(sess_id)
                 if st is not None:
                     try:
-                        await self._strategy.on_account_snapshot(sess_id, acc_obj, st)
+                        _ = asyncio.create_task(self._strategy.on_account_snapshot(sess_id, acc_obj,
+                                                                                    st))
                     except Exception:
                         pass
             return
@@ -540,7 +550,7 @@ class SimutradorClientSession:
                 st = self._stores.get(sess_id)
                 if st is not None:
                     try:
-                        await self._strategy.on_session_end(sess_id, end_obj, st)
+                        _ = asyncio.create_task(self._strategy.on_session_end(sess_id, end_obj, st))
                     except Exception:
                         pass
             return

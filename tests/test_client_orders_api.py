@@ -255,3 +255,44 @@ async def test_place_bracket_order_builds_order_payload(monkeypatch: pytest.Monk
 
     await client.close()
 
+
+
+
+@pytest.mark.asyncio
+async def test_submit_orders_server_error_rejects_future(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_ws = FakeWS()
+
+    async def fake_connect(url: str):  # type: ignore[override]
+        return fake_ws
+
+    import websockets
+
+    monkeypatch.setattr(websockets, "connect", fake_connect)
+
+    client = SimutradorClientSession(strategy=_NoopStrategy(), auth=cast(Any, FakeAuth()), base_ws_url="ws://localhost:8003")
+    await client.connect()
+
+    # Start submit_orders in background
+    task = asyncio.create_task(
+        client.submit_orders(
+            "sess-1",
+            [{"order_id": "o1", "symbol": "AAPL", "side": "buy", "type": "market", "quantity": 1}],
+            batch_id="b_err",
+        )
+    )
+
+    # Wait for outbound
+    for _ in range(100):
+        if fake_ws.sent:
+            break
+        await asyncio.sleep(0.01)
+    outbound = fake_ws.sent[-1]
+    rid = outbound.get("request_id")
+
+    # Push a server error with the same request_id
+    await fake_ws.push({"type": "error", "request_id": rid, "data": {"error_code": "INVALID"}})
+
+    with pytest.raises(SessionProtocolError):
+        await task
+
+    await client.close()
