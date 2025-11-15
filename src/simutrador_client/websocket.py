@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any, Awaitable, Callable
+from typing import Any
 from uuid import uuid4
 
 import websockets
@@ -131,7 +132,11 @@ class _DecisionStrategyAdapter:
     and forwards OrderSpec intents from on_tick into the execution adapter.
     """
 
-    def __init__(self, decision_strategy: DecisionOnlyStrategy, execution: _ExecutionAdapter) -> None:
+    def __init__(
+        self,
+        decision_strategy: DecisionOnlyStrategy,
+        execution: _ExecutionAdapter,
+    ) -> None:
         self._decision_strategy = decision_strategy
         self._execution = execution
 
