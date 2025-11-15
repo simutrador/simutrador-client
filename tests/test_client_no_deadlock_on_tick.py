@@ -72,6 +72,42 @@ class _StrategyPlaceOnTick:
         return None
 
 
+class _StrategyPlaceOnTickNowait:
+    def __init__(self) -> None:
+        self._sess: SimutradorClientSession | None = None
+        self.done: asyncio.Event = asyncio.Event()
+
+    def set_session(self, sess: SimutradorClientSession) -> None:
+        self._sess = sess
+
+    async def on_session_start(self, session_id: str, store: Any, meta: dict[str, Any] | None = None) -> None:
+        return None
+
+    async def on_tick(self, session_id: str, tick: Any, store: Any) -> None:
+        assert self._sess is not None
+        # Non-blocking order placement from within the callback
+        task = self._sess.place_bracket_order_nowait(
+            session_id,
+            symbol="AAPL",
+            side="buy",
+            order_type="market",
+            quantity=1,
+            batch_id="b2",
+        )
+        assert isinstance(task, asyncio.Task)
+        self.done.set()
+
+    async def on_fill(self, session_id: str, fill: Any, store: Any) -> None:
+        return None
+
+    async def on_account_snapshot(self, session_id: str, account: Any, store: Any) -> None:
+        return None
+
+    async def on_session_end(self, session_id: str, end: Any, store: Any) -> None:
+        return None
+
+
+
 @pytest.mark.asyncio
 async def test_no_deadlock_when_placing_order_inside_on_tick(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_ws = FakeWS()
@@ -156,6 +192,94 @@ async def test_no_deadlock_when_placing_order_inside_on_tick(monkeypatch: pytest
     )
 
     # Ensure the strategy's on_tick completed (no deadlock)
+    await asyncio.wait_for(strategy.done.wait(), timeout=2.0)
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_nowait_order_api_does_not_block_on_tick(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_ws = FakeWS()
+
+    async def fake_connect(url: str):  # type: ignore[override]
+        assert "/ws/simulate" in url
+        return fake_ws
+
+    import websockets
+
+    monkeypatch.setattr(websockets, "connect", fake_connect)
+
+    strategy = _StrategyPlaceOnTickNowait()
+    client = SimutradorClientSession(strategy=strategy, auth=cast(Any, FakeAuth()), base_ws_url="ws://localhost:8003")
+    await client.connect()
+
+    session_id = "sess-2"
+
+    # Prime store with an empty warmup snapshot
+    await fake_ws.push(
+        {
+            "type": "history_snapshot",
+            "data": {
+                "session_id": session_id,
+                "timeframe": "1min",
+                "candles": {"AAPL": []},
+                "start": None,
+                "end": None,
+                "count": 0,
+            },
+        }
+    )
+
+    # Push one tick
+    now = datetime(2024, 1, 2, 9, 30, tzinfo=timezone.utc).isoformat()
+    await fake_ws.push(
+        {
+            "type": "tick",
+            "data": {
+                "session_id": session_id,
+                "candles": {
+                    "AAPL": {
+                        "date": now,
+                        "open": 100.0,
+                        "high": 101.0,
+                        "low": 99.5,
+                        "close": 100.5,
+                        "volume": 1000,
+                    }
+                },
+            },
+        }
+    )
+
+    # Wait for outbound order_batch
+    for _ in range(200):
+        if fake_ws.sent:
+            break
+        await asyncio.sleep(0.01)
+    assert fake_ws.sent, "Client did not send order_batch from on_tick() using nowait API"
+
+    outbound: dict[str, Any] = fake_ws.sent[-1]
+    assert outbound["type"] == "order_batch"
+    rid = outbound.get("request_id")
+    data = cast(dict[str, Any], outbound.get("data") or {})
+    orders = cast(list[dict[str, Any]], data.get("orders") or [])
+    order_id = cast(str, orders[0].get("order_id"))
+
+    # Push matching batch_ack; the strategy should not be blocked waiting for it
+    await fake_ws.push(
+        {
+            "type": "batch_ack",
+            "request_id": rid,
+            "data": {
+                "batch_id": "b2",
+                "accepted_orders": [order_id],
+                "rejected_orders": {},
+                "estimated_fills": {},
+            },
+        }
+    )
+
+    # Ensure the strategy's on_tick completed (no deadlock, non-blocking API)
     await asyncio.wait_for(strategy.done.wait(), timeout=2.0)
 
     await client.close()

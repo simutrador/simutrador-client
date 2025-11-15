@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import pytest
 
+from simutrador_client.strategy import DecisionOnlyStrategy, OrderSpec
 from simutrador_client.websocket import SimutradorClientSession
 
 
@@ -25,6 +26,25 @@ class _NoopStrategy:
 
     async def on_session_end(self, session_id: str, end: Any, store: Any) -> None:
         return None
+
+
+class _DecisionStrategyOneOrder(DecisionOnlyStrategy):
+    def __init__(self) -> None:
+        self.seen_ticks: list[Any] = []
+
+    async def on_tick(self, session_id: str, tick: Any, store: Any) -> list[OrderSpec]:
+        self.seen_ticks.append(tick)
+        return [
+            OrderSpec(
+                symbol="AAPL",
+                side="buy",
+                quantity=1,
+                order_type="market",
+                tif="day",
+                tag="test_decision",
+            )
+        ]
+
 
 
 class FakeAuth:
@@ -144,4 +164,103 @@ async def test_start_and_wait_history_snapshot(monkeypatch: pytest.MonkeyPatch) 
     assert snapshot.count == 0
 
     await client.close()
+
+
+
+@pytest.mark.asyncio
+async def test_decision_only_strategy_triggers_order_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_ws = FakeWS()
+
+    async def fake_connect(url: str):  # type: ignore[override]
+        # Basic sanity on URL shape
+        assert "/ws/simulate" in url
+        assert "token=" in url
+        return fake_ws
+
+    import websockets
+
+    monkeypatch.setattr(websockets, "connect", fake_connect)
+
+    strategy = _DecisionStrategyOneOrder()
+    client = SimutradorClientSession(strategy=strategy, auth=cast(Any, FakeAuth()), base_ws_url="ws://localhost:8003")
+    await client.connect()
+
+    session_id = "sess-2"
+
+    # Warmup snapshot establishes the store
+    await fake_ws.push(
+        {
+            "type": "history_snapshot",
+            "request_id": None,
+            "data": {
+                "session_id": session_id,
+                "timeframe": "1min",
+                "candles": {"AAPL": []},
+                "start": None,
+                "end": None,
+                "count": 0,
+            },
+        }
+    )
+
+    # Single tick should cause the decision-only strategy to emit one OrderSpec
+    now = datetime(2023, 1, 2, 10, 0, 0, tzinfo=UTC).isoformat()
+    await fake_ws.push(
+        {
+            "type": "tick",
+            "data": {
+                "session_id": session_id,
+                "candles": {
+                    "AAPL": {
+                        "date": now,
+                        "open": 100.0,
+                        "high": 101.0,
+                        "low": 99.5,
+                        "close": 100.5,
+                        "volume": 1000,
+                    }
+                },
+            },
+        }
+    )
+
+    # Wait for an order_batch from the execution adapter
+    for _ in range(200):
+        if any(msg.get("type") == "order_batch" for msg in fake_ws.sent):
+            break
+        await asyncio.sleep(0.01)
+
+    order_msgs = [msg for msg in fake_ws.sent if msg.get("type") == "order_batch"]
+    assert order_msgs, "DecisionOnlyStrategy did not trigger order_batch via execution adapter"
+
+    outbound = order_msgs[-1]
+    rid = outbound.get("request_id")
+    data = cast(dict[str, Any], outbound.get("data") or {})
+    orders = cast(list[dict[str, Any]], data.get("orders") or [])
+    assert len(orders) == 1
+    assert orders[0]["symbol"] == "AAPL"
+    order_id = orders[0].get("order_id")
+
+    # Complete the batch by sending a matching ack
+    await fake_ws.push(
+        {
+            "type": "batch_ack",
+            "request_id": rid,
+            "data": {
+                "batch_id": data.get("batch_id") or "b_decision",
+                "accepted_orders": [order_id],
+                "rejected_orders": {},
+                "estimated_fills": {},
+            },
+        }
+    )
+
+    # Give the worker a brief moment to process the ack
+    await asyncio.sleep(0.01)
+
+    # Strategy should have seen exactly one tick
+    assert len(strategy.seen_ticks) == 1
+
+    await client.close()
+
 

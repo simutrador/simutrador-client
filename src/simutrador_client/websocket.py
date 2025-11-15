@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
 import websockets
@@ -13,7 +13,7 @@ import websockets
 from .auth import AuthClient, AuthenticationError, get_auth_client
 from .settings import get_settings
 from .store import Store
-from .strategy import Strategy
+from .strategy import DecisionOnlyStrategy, OrderSpec, Strategy
 
 
 class SessionProtocolError(Exception):
@@ -37,6 +37,135 @@ class _Pending:
     ended: asyncio.Future[SimpleNamespace] | None = None
 
 
+
+@dataclass
+class _ExecutionIntent:
+    session_id: str
+    spec: OrderSpec
+
+
+class _ExecutionAdapter:
+    """Background executor for OrderSpec intents.
+
+    This helper owns a small queue and worker task that translates high-level
+    OrderSpec instances into concrete order payloads and submits them via
+    SimutradorClientSession.submit_orders. It also enforces a simple
+    per-session, per-symbol "one order in flight" guard.
+    """
+
+    def __init__(
+        self,
+        submit_orders: Callable[[str, list[dict[str, Any]]], Awaitable[dict[str, Any]]],
+    ) -> None:
+        self._submit_orders = submit_orders
+        self._queue: asyncio.Queue[_ExecutionIntent] = asyncio.Queue()
+        self._task: asyncio.Task[None] | None = None
+        self._in_flight: set[tuple[str, str]] = set()
+        self._closed = False
+
+    def enqueue(self, session_id: str, intents: list[OrderSpec]) -> None:
+        """Enqueue intents for background execution.
+
+        Intents for a (session_id, symbol) pair are only enqueued if there is
+        not already an order in flight for that pair.
+        """
+
+        if not intents:
+            return
+
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._worker())
+
+        for spec in intents:
+            key = (session_id, spec.symbol)
+            if key in self._in_flight:
+                continue
+            self._in_flight.add(key)
+            self._queue.put_nowait(_ExecutionIntent(session_id=session_id, spec=spec))
+
+    async def _worker(self) -> None:
+        while not self._closed:
+            intent = await self._queue.get()
+            key = (intent.session_id, intent.spec.symbol)
+            try:
+                order: dict[str, Any] = {
+                    "order_id": str(uuid4()),
+                    "symbol": intent.spec.symbol,
+                    "side": intent.spec.side,
+                    "type": intent.spec.order_type,
+                    "quantity": intent.spec.quantity,
+                    "time_in_force": intent.spec.tif,
+                }
+                if intent.spec.price is not None:
+                    order["price"] = intent.spec.price
+                if intent.spec.stop_loss is not None:
+                    order["stop_loss"] = intent.spec.stop_loss
+                if intent.spec.take_profit is not None:
+                    order["take_profit"] = intent.spec.take_profit
+
+                await self._submit_orders(intent.session_id, [order])
+            except Exception:
+                # For this adapter we swallow execution errors to avoid
+                # impacting the WebSocket receive loop; callers can inspect
+                # logs or track outcomes via order callbacks.
+                pass
+            finally:
+                self._in_flight.discard(key)
+                self._queue.task_done()
+
+    async def aclose(self) -> None:
+        self._closed = True
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:  # pragma: no cover - best-effort cleanup
+                pass
+            self._task = None
+
+
+class _DecisionStrategyAdapter:
+    """Adapter that turns a DecisionOnlyStrategy into a Strategy.
+
+    It delegates lifecycle callbacks to the underlying decision-only strategy
+    and forwards OrderSpec intents from on_tick into the execution adapter.
+    """
+
+    def __init__(self, decision_strategy: DecisionOnlyStrategy, execution: _ExecutionAdapter) -> None:
+        self._decision_strategy = decision_strategy
+        self._execution = execution
+
+    def set_session(self, sess: Any) -> None:
+        """Optional hook to forward the session handle to the wrapped strategy."""
+
+        hook = getattr(self._decision_strategy, "set_session", None)
+        if callable(hook):
+            hook(sess)
+
+    async def on_session_start(
+        self, session_id: str, store: Store, meta: dict[str, Any] | None = None
+    ) -> None:
+        await self._decision_strategy.on_session_start(session_id, store, meta)
+
+    async def on_tick(self, session_id: str, tick: SimpleNamespace, store: Store) -> None:
+        intents = await self._decision_strategy.on_tick(session_id, tick, store)
+        if intents:
+            self._execution.enqueue(session_id, intents)
+
+    async def on_fill(self, session_id: str, fill: SimpleNamespace, store: Store) -> None:
+        await self._decision_strategy.on_fill(session_id, fill, store)
+
+    async def on_account_snapshot(
+        self, session_id: str, account: SimpleNamespace, store: Store
+    ) -> None:
+        await self._decision_strategy.on_account_snapshot(session_id, account, store)
+
+    async def on_session_end(
+        self, session_id: str, end: SimpleNamespace, store: Store
+    ) -> None:
+        await self._decision_strategy.on_session_end(session_id, end, store)
+
+
 class SimutradorClientSession:
     """Minimal WebSocket client for SimuTrador session lifecycle (MVP).
 
@@ -55,7 +184,14 @@ class SimutradorClientSession:
         self._settings = get_settings()
         self._auth: AuthClient = auth or get_auth_client(self._settings.auth.server_url)
         self._base_ws_url: str = (base_ws_url or self._settings.server.websocket.url).rstrip("/")
-        self._strategy: Strategy = strategy
+
+        # Optional execution adapter used when a DecisionOnlyStrategy is provided.
+        self._execution_adapter: _ExecutionAdapter | None = None
+        if isinstance(strategy, DecisionOnlyStrategy):
+            self._execution_adapter = _ExecutionAdapter(self._submit_orders_for_adapter)
+            self._strategy: Strategy = _DecisionStrategyAdapter(strategy, self._execution_adapter)
+        else:
+            self._strategy = strategy
 
         self._ws: Any = None
         self._reader_task: asyncio.Task[Any] | None = None
@@ -108,11 +244,16 @@ class SimutradorClientSession:
     async def close(self) -> None:
         """Close the WebSocket connection and cancel background tasks."""
         self._closed = True
+
+        if self._execution_adapter is not None:
+            await self._execution_adapter.aclose()
+
         if self._reader_task is not None:
             self._reader_task.cancel()
             try:
                 await self._reader_task
             except asyncio.CancelledError:
+                # Normal shutdown path: the receive loop should propagate cancellation.
                 pass
             finally:
                 self._reader_task = None
@@ -264,6 +405,25 @@ class SimutradorClientSession:
     # ------------------------
     # Orders API (Phase 1)
     # ------------------------
+
+    async def _submit_orders_for_adapter(
+        self, session_id: str, orders: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Internal helper used by the execution adapter.
+
+        It forwards high-level OrderSpec batches into the normal submit_orders
+        path with default execution parameters.
+        """
+
+        return await self.submit_orders(
+            session_id,
+            orders,
+            batch_id=None,
+            execution_mode="best_effort",
+            request_id=None,
+        )
+
+
     async def submit_orders(
         self,
         session_id: str,
@@ -309,9 +469,35 @@ class SimutradorClientSession:
         if not isinstance(ack.get("accepted_orders"), list):
             raise SessionProtocolError("Invalid batch_ack payload: accepted_orders must be a list")
         if not isinstance(ack.get("rejected_orders"), dict):
-            raise SessionProtocolError("Invalid batch_ack payload: rejected_orders must be an" \
-            " object")
+            raise SessionProtocolError(
+                "Invalid batch_ack payload: rejected_orders must be an object"
+            )
         return ack
+
+    def submit_orders_nowait(
+        self,
+        session_id: str,
+        orders: list[dict[str, Any]],
+        *,
+        batch_id: str | None = None,
+        execution_mode: str = "best_effort",
+        request_id: str | None = None,
+    ) -> asyncio.Task[dict[str, Any]]:
+        """Submit orders and immediately return a Task for the batch_ack.
+
+        This helper is useful from strategy callbacks that must not block the
+        WebSocket receive loop.
+        """
+
+        return asyncio.create_task(
+            self.submit_orders(
+                session_id,
+                orders,
+                batch_id=batch_id,
+                execution_mode=execution_mode,
+                request_id=request_id,
+            )
+        )
 
     async def place_bracket_order(
         self,
@@ -351,6 +537,44 @@ class SimutradorClientSession:
             execution_mode="best_effort",
             request_id=request_id,
         )
+
+    def place_bracket_order_nowait(
+        self,
+        session_id: str,
+        *,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: int,
+        price: float | int | str | None = None,
+        stop_loss: float | int | str | None = None,
+        take_profit: float | int | str | None = None,
+        tif: str = "day",
+        batch_id: str | None = None,
+        request_id: str | None = None,
+    ) -> asyncio.Task[dict[str, Any]]:
+        """Non-blocking version of place_bracket_order.
+
+        This helper schedules order placement in the background and returns the
+        Task representing the eventual batch_ack.
+        """
+
+        return asyncio.create_task(
+            self.place_bracket_order(
+                session_id,
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                quantity=quantity,
+                price=price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                tif=tif,
+                batch_id=batch_id,
+                request_id=request_id,
+            )
+        )
+
 
 
     # ------------------------

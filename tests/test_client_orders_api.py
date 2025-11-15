@@ -296,3 +296,118 @@ async def test_submit_orders_server_error_rejects_future(monkeypatch: pytest.Mon
         await task
 
     await client.close()
+
+
+
+@pytest.mark.asyncio
+async def test_submit_orders_nowait_returns_task_and_ack(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_ws = FakeWS()
+
+    async def fake_connect(url: str):  # type: ignore[override]
+        return fake_ws
+
+    import websockets
+
+    monkeypatch.setattr(websockets, "connect", fake_connect)
+
+    client = SimutradorClientSession(
+        strategy=_NoopStrategy(),
+        auth=cast(Any, FakeAuth()),
+        base_ws_url="ws://localhost:8003",
+    )
+    await client.connect()
+
+    orders = [
+        {"order_id": "o1", "symbol": "AAPL", "side": "buy", "type": "market", "quantity": 10}
+    ]
+    task = client.submit_orders_nowait("sess-1", orders, batch_id="b_nowait")
+    assert isinstance(task, asyncio.Task)
+
+    # Wait for outbound
+    for _ in range(100):
+        if fake_ws.sent:
+            break
+        await asyncio.sleep(0.01)
+    assert fake_ws.sent, "Client did not send order_batch"
+
+    outbound = fake_ws.sent[-1]
+    assert outbound["type"] == "order_batch"
+    rid = outbound.get("request_id")
+    assert isinstance(rid, str)
+
+    await fake_ws.push(
+        {
+            "type": "batch_ack",
+            "request_id": rid,
+            "data": {
+                "batch_id": "b_nowait",
+                "accepted_orders": ["o1"],
+                "rejected_orders": {},
+                "estimated_fills": {},
+            },
+        }
+    )
+
+    ack = await task
+    assert ack["batch_id"] == "b_nowait"
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_place_bracket_order_nowait_returns_task(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_ws = FakeWS()
+
+    async def fake_connect(url: str):  # type: ignore[override]
+        return fake_ws
+
+    import websockets
+
+    monkeypatch.setattr(websockets, "connect", fake_connect)
+
+    client = SimutradorClientSession(
+        strategy=_NoopStrategy(),
+        auth=cast(Any, FakeAuth()),
+        base_ws_url="ws://localhost:8003",
+    )
+    await client.connect()
+
+    task = client.place_bracket_order_nowait(
+        "sess-1",
+        symbol="AAPL",
+        side="buy",
+        order_type="market",
+        quantity=1,
+        batch_id="b_nowait",
+    )
+    assert isinstance(task, asyncio.Task)
+
+    # Wait for outbound
+    for _ in range(100):
+        if fake_ws.sent:
+            break
+        await asyncio.sleep(0.01)
+    outbound = fake_ws.sent[-1]
+    assert outbound["type"] == "order_batch"
+    data = cast(dict[str, Any], outbound.get("data") or {})
+    orders = cast(list[dict[str, Any]], data.get("orders") or [])
+    order_id = cast(str, orders[0].get("order_id"))
+    rid = outbound.get("request_id")
+
+    await fake_ws.push(
+        {
+            "type": "batch_ack",
+            "request_id": rid,
+            "data": {
+                "batch_id": "b_nowait",
+                "accepted_orders": [order_id],
+                "rejected_orders": {},
+                "estimated_fills": {},
+            },
+        }
+    )
+
+    ack = await task
+    assert ack["batch_id"] == "b_nowait"
+
+    await client.close()
